@@ -1,8 +1,9 @@
 import os
 import asyncio
 import json
+import re
 
-from flask import Flask, request
+from flask import Flask
 from openai import OpenAI
 
 from telegram import Update
@@ -264,23 +265,30 @@ def load_memory():
         with open(MEMORY_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-            if not isinstance(data, dict):
-                raise ValueError("Invalid memory format")
+            if isinstance(data, dict):
+                if "users" not in data:
+                    data["users"] = {}
+                return data
 
-            if "users" not in data:
-                data["users"] = {}
+    except Exception as e:
+        print("MEMORY LOAD ERROR:", repr(e))
 
-            return data
-
-    except Exception:
-        return {
-            "users": {}
-        }
+    return {
+        "users": {}
+    }
 
 
 def save_memory():
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(memory, f, ensure_ascii=False, indent=2)
+    try:
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(
+                memory,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+    except Exception as e:
+        print("MEMORY SAVE ERROR:", repr(e))
 
 
 memory = load_memory()
@@ -297,6 +305,37 @@ def get_user_memory(user_id, first_name):
     return memory["users"][user_id]
 
 
+def extract_memory_updates(text):
+    """
+    Ищем простые постоянные данные в сообщении пользователя.
+    Это специально сделано без дополнительного вызова OpenAI.
+    """
+
+    updates = {}
+
+    # Рост
+    height = re.search(
+        r"(?:рост|ростом)\s*(?:у меня\s*)?(\d{2,3})\s*(?:см|сантиметров)?",
+        text.lower()
+    )
+
+    if height:
+        updates["height_cm"] = int(height.group(1))
+
+    # Вес
+    weight = re.search(
+        r"(?:вес|вешу|весом)\s*(?:у меня\s*)?(\d{2,3}(?:[.,]\d+)?)\s*(?:кг|килограмм)?",
+        text.lower()
+    )
+
+    if weight:
+        updates["weight_kg"] = float(
+            weight.group(1).replace(",", ".")
+        )
+
+    return updates
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Привет! 🍽️\n\n"
@@ -307,17 +346,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def send_long_message(message, text):
+    """
+    Telegram ограничивает длину одного сообщения.
+    Разбиваем длинные ответы на безопасные части.
+    """
+
+    max_length = 3900
+
+    if len(text) <= max_length:
+        await message.reply_text(text)
+        return
+
+    chunks = []
+
+    while len(text) > max_length:
+        cut = text.rfind("\n", 0, max_length)
+
+        if cut < 1000:
+            cut = max_length
+
+        chunks.append(text[:cut])
+        text = text[cut:].lstrip()
+
+    if text:
+        chunks.append(text)
+
+    for chunk in chunks:
+        await message.reply_text(chunk)
+
+
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     user_id = str(update.effective_user.id)
-    user_message = update.message.text
+    user_message = update.message.text.strip()
+
+    print("MESSAGE:", user_message)
 
     user_memory = get_user_memory(
         user_id,
         update.effective_user.first_name
     )
+
+    # Автоматически сохраняем простые данные профиля.
+    updates = extract_memory_updates(user_message)
+
+    if updates:
+        user_memory["profile"].update(updates)
+        save_memory()
+
+        print("MEMORY UPDATED:", updates)
 
     memory_context = json.dumps(
         user_memory,
@@ -337,15 +417,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Используй сохранённые данные.
 
 ВАЖНО:
-- Не спрашивай повторно данные, которые уже есть в сохранённом профиле.
-- Если пользователь сообщает новые постоянные данные, используй их.
-- Если пользователь явно меняет старые данные, используй новые.
-- Не нужно объяснять пользователю техническую работу памяти.
+- Не спрашивай повторно данные, которые уже есть в профиле.
+- Если рост или вес уже сохранены, используй их.
+- Если пользователь сообщает новые данные, используй их.
+- Не объясняй техническую работу памяти.
 """
 
     try:
-        print("MESSAGE:", user_message)
-
         response = client.responses.create(
             model="gpt-5-mini",
             instructions=SYSTEM_PROMPT,
@@ -356,74 +434,36 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         print("OPENAI OK")
 
-        if not answer:
-            await update.message.reply_text(
-                "ИИ не вернул текстовый ответ 😔"
-            )
-            return
+    except Exception as e:
+        print("OPENAI ERROR:", repr(e))
 
-        # Telegram ограничивает длину одного сообщения.
-        # Разбиваем длинные ответы на части.
-        max_length = 3900
+        await update.message.reply_text(
+            "Произошла ошибка при обращении к ИИ 😔"
+        )
+        return
 
-        chunks = [
-            answer[i:i + max_length]
-            for i in range(0, len(answer), max_length)
-        ]
+    # Отдельно обрабатываем ошибку Telegram.
+    try:
+        await send_long_message(
+            update.message,
+            answer
+        )
 
-        for chunk in chunks:
-            await update.message.reply_text(chunk)
+        print("TELEGRAM RESPONSE SENT")
 
     except Exception as e:
-        print("BOT ERROR:", repr(e))
-
-        try:
-            await update.message.reply_text(
-                "Произошла ошибка 😔 Попробуй ещё раз."
-            )
-        except Exception as telegram_error:
-            print("TELEGRAM ERROR:", repr(telegram_error))
+        print("TELEGRAM ERROR:", repr(e))
 
 
 app = Flask(__name__)
 
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
     return "Menu bot is alive!"
 
 
-application = None
-
-
-async def process_update(update_data):
-    global application
-
-    update = Update.de_json(
-        update_data,
-        application.bot
-    )
-
-    await application.process_update(update)
-
-
-@app.route("/telegram", methods=["POST"])
-def telegram_webhook():
-    try:
-        update_data = request.get_json(force=True)
-
-        asyncio.run(process_update(update_data))
-
-        return "OK", 200
-
-    except Exception as e:
-        print("WEBHOOK ERROR:", repr(e))
-        return "ERROR", 500
-
-
-async def setup_bot():
-    global application
-
+async def run_bot():
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -443,12 +483,15 @@ async def setup_bot():
 
     await application.initialize()
     await application.start()
+    await application.updater.start_polling()
 
-    print("Telegram webhook bot started!")
+    print("Telegram bot started!")
+
+    await asyncio.Event().wait()
 
 
 async def main():
-    await setup_bot()
+    bot_task = asyncio.create_task(run_bot())
 
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
