@@ -7,11 +7,16 @@ from flask import Flask
 from openai import OpenAI
 from supabase import create_client
 
-from telegram import Update
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
+    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
@@ -205,19 +210,15 @@ SYSTEM_PROMPT = """
 Например:
 
 «Замени завтрак»
-
 → заменить только завтрак Павла.
 
 «Замени основное блюдо»
-
 → заменить только основное блюдо.
 
 «Замени закуску Марианны»
-
 → заменить только закуску Марианны.
 
 «Замени овощи Павла»
-
 → заменить только овощное дополнение Павла.
 
 Если пользователь предлагает конкретную замену,
@@ -226,13 +227,11 @@ SYSTEM_PROMPT = """
 Например:
 
 «Замени завтрак на сырники»
-
 → новый завтрак должен быть сырниками,
 остальные элементы цикла сохранить.
 
 Если пользователь говорит:
 «Мне надоел этот завтрак, давай другой»
-
 → понять, что речь идёт о завтраке,
 и заменить только его.
 
@@ -354,6 +353,137 @@ def empty_memory():
             "menu_history": []
         }
     }
+
+
+# ============================================================
+# КЛАВИАТУРЫ
+# ============================================================
+
+def main_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🆕  Новый цикл на 3 дня",
+                callback_data="new_cycle"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔄  Заменить блюдо",
+                callback_data="replace_menu"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🛒  Продукты",
+                callback_data="products"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "❤️  Предпочтения",
+                callback_data="preferences"
+            )
+        ],
+    ])
+
+
+def replace_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🍳  Завтрак",
+                callback_data="replace_breakfast"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🍗  Основное",
+                callback_data="replace_main"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🥨  Закуска",
+                callback_data="replace_snack"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🥦  Овощи",
+                callback_data="replace_vegetables"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↩️  Назад",
+                callback_data="main_menu"
+            )
+        ],
+    ])
+
+
+def products_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🏠  Что есть дома",
+                callback_data="food_home"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "✏️  Изменить продукты",
+                callback_data="edit_food"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↩️  Назад",
+                callback_data="main_menu"
+            )
+        ],
+    ])
+
+
+def preferences_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "👩  Марианна",
+                callback_data="pref_marianna"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "👨  Павел",
+                callback_data="pref_pavel"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "⭐  Оценить блюдо",
+                callback_data="rate_dish"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "↩️  Назад",
+                callback_data="main_menu"
+            )
+        ],
+    ])
+
+
+def back_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "↩️  Назад",
+                callback_data="main_menu"
+            )
+        ]
+    ])
 
 
 # ============================================================
@@ -571,11 +701,7 @@ def remove_dish_from_list(items, dish):
 
         if isinstance(item, str):
 
-            if text_matches(
-                item,
-                dish
-            ):
-
+            if text_matches(item, dish):
                 should_remove = True
 
         elif isinstance(item, dict):
@@ -610,10 +736,7 @@ def remove_dish_from_list(items, dish):
 # РЕКУРСИВНОЕ УДАЛЕНИЕ
 # ============================================================
 
-def remove_dish_recursive(
-    value,
-    dish
-):
+def remove_dish_recursive(value, dish):
 
     if isinstance(value, list):
 
@@ -623,11 +746,7 @@ def remove_dish_recursive(
 
             if isinstance(item, str):
 
-                if text_matches(
-                    item,
-                    dish
-                ):
-
+                if text_matches(item, dish):
                     continue
 
             elif isinstance(item, dict):
@@ -678,11 +797,7 @@ def remove_dish_recursive(
 
         for key, item in value.items():
 
-            if text_matches(
-                key,
-                dish
-            ):
-
+            if text_matches(key, dish):
                 continue
 
             result[key] = remove_dish_recursive(
@@ -739,9 +854,7 @@ def delete_all_about_dish(
         )
     )
 
-    if shared.get(
-        "current_menu"
-    ) is not None:
+    if shared.get("current_menu") is not None:
 
         shared["current_menu"] = (
             remove_dish_recursive(
@@ -760,9 +873,7 @@ def delete_all_about_dish(
         )
     )
 
-    for key in list(
-        shared.keys()
-    ):
+    for key in list(shared.keys()):
 
         if key in [
             "liked_dishes",
@@ -808,10 +919,7 @@ def update_dish_rating(
 
     for item in ratings:
 
-        if not isinstance(
-            item,
-            dict
-        ):
+        if not isinstance(item, dict):
 
             new_ratings.append(item)
             continue
@@ -823,9 +931,7 @@ def update_dish_rating(
             or ""
         )
 
-        item_person = item.get(
-            "person"
-        )
+        item_person = item.get("person")
 
         if (
             text_matches(
@@ -869,12 +975,9 @@ def apply_memory_updates(
             operation,
             dict
         ):
-
             continue
 
-        action = operation.get(
-            "action"
-        )
+        action = operation.get("action")
 
         # ====================================================
         # ADD / UPDATE
@@ -885,24 +988,15 @@ def apply_memory_updates(
             "update"
         ]:
 
-            person = operation.get(
-                "person"
-            )
-
-            field = operation.get(
-                "field"
-            )
-
-            value = operation.get(
-                "value"
-            )
+            person = operation.get("person")
+            field = operation.get("field")
+            value = operation.get("value")
 
             if person not in [
                 "marianna",
                 "pavel",
                 "shared"
             ]:
-
                 continue
 
             if not field:
@@ -935,10 +1029,7 @@ def apply_memory_updates(
 
                 if field == "food_at_home":
 
-                    if isinstance(
-                        value,
-                        dict
-                    ):
+                    if isinstance(value, dict):
 
                         memory_data[
                             "shared"
@@ -948,10 +1039,7 @@ def apply_memory_updates(
 
                 elif field == "liked_dishes":
 
-                    if isinstance(
-                        value,
-                        list
-                    ):
+                    if isinstance(value, list):
 
                         for item in value:
 
@@ -969,10 +1057,7 @@ def apply_memory_updates(
 
                 elif field == "disliked_dishes":
 
-                    if isinstance(
-                        value,
-                        list
-                    ):
+                    if isinstance(value, list):
 
                         for item in value:
 
@@ -990,22 +1075,11 @@ def apply_memory_updates(
 
                 elif field == "dish_rating":
 
-                    if isinstance(
-                        value,
-                        dict
-                    ):
+                    if isinstance(value, dict):
 
-                        dish = value.get(
-                            "dish"
-                        )
-
-                        person_value = value.get(
-                            "person"
-                        )
-
-                        rating = value.get(
-                            "rating"
-                        )
+                        dish = value.get("dish")
+                        person_value = value.get("person")
+                        rating = value.get("rating")
 
                         if (
                             dish
@@ -1032,10 +1106,7 @@ def apply_memory_updates(
 
                 elif field == "menu_history":
 
-                    if isinstance(
-                        value,
-                        list
-                    ):
+                    if isinstance(value, list):
 
                         memory_data[
                             "shared"
@@ -1049,24 +1120,15 @@ def apply_memory_updates(
 
         elif action == "delete":
 
-            person = operation.get(
-                "person"
-            )
-
-            field = operation.get(
-                "field"
-            )
-
-            value = operation.get(
-                "value"
-            )
+            person = operation.get("person")
+            field = operation.get("field")
+            value = operation.get("value")
 
             if person not in [
                 "marianna",
                 "pavel",
                 "shared"
             ]:
-
                 continue
 
             if person in [
@@ -1113,10 +1175,7 @@ def apply_memory_updates(
                         {}
                     )
 
-                    if isinstance(
-                        food,
-                        dict
-                    ):
+                    if isinstance(food, dict):
 
                         keys_to_delete = []
 
@@ -1130,12 +1189,9 @@ def apply_memory_updates(
                                 )
                             ):
 
-                                keys_to_delete.append(
-                                    key
-                                )
+                                keys_to_delete.append(key)
 
                         for key in keys_to_delete:
-
                             del food[key]
 
                 elif field == "liked_dishes":
@@ -1198,9 +1254,7 @@ def apply_memory_updates(
 
         elif action == "delete_all_dish":
 
-            dish = operation.get(
-                "dish"
-            )
+            dish = operation.get("dish")
 
             if dish:
 
@@ -1460,11 +1514,7 @@ clear_food
 
         data = json.loads(text)
 
-        if not isinstance(
-            data,
-            dict
-        ):
-
+        if not isinstance(data, dict):
             return []
 
         operations = data.get(
@@ -1472,11 +1522,7 @@ clear_food
             []
         )
 
-        if not isinstance(
-            operations,
-            list
-        ):
-
+        if not isinstance(operations, list):
             return []
 
         return operations
@@ -1492,12 +1538,10 @@ clear_food
 
 
 # ============================================================
-# ОПРЕДЕЛЕНИЕ ЗАМЕНЫ БЛЮДА
+# ОПРЕДЕЛЕНИЕ ЗАМЕНЫ
 # ============================================================
 
-def detect_replacement_request(
-    user_message
-):
+def detect_replacement_request(user_message):
 
     text = normalize_text(
         user_message
@@ -1519,40 +1563,31 @@ def detect_replacement_request(
         word in text
         for word in replacement_words
     ):
-
         return None
 
-    # Завтрак
     if (
         "завтрак" in text
         or "завтрака" in text
     ):
-
         return "breakfast"
 
-    # Основное
     if (
         "основное блюдо" in text
         or "основное" in text
         or "обед" in text
     ):
-
         return "main"
 
-    # Закуска Марианны
     if (
         "закуск" in text
         or "хрустящ" in text
     ):
-
         return "marianna_snack"
 
-    # Овощи Павла
     if (
         "овощ" in text
         or "овощное дополнение" in text
     ):
-
         return "pavel_vegetables"
 
     return None
@@ -1562,9 +1597,7 @@ def detect_replacement_request(
 # ПРОВЕРКА НОВОГО МЕНЮ
 # ============================================================
 
-def is_new_menu_request(
-    user_message
-):
+def is_new_menu_request(user_message):
 
     text = normalize_text(
         user_message
@@ -1587,12 +1620,10 @@ def is_new_menu_request(
 
 
 # ============================================================
-# ПРОВЕРКА ЗАПРОСА ТЕКУЩЕГО МЕНЮ
+# ПРОВЕРКА ТЕКУЩЕГО МЕНЮ
 # ============================================================
 
-def is_current_menu_request(
-    user_message
-):
+def is_current_menu_request(user_message):
 
     text = normalize_text(
         user_message
@@ -1625,7 +1656,6 @@ def replace_single_menu_item(
 ):
 
     if not current_menu:
-
         return None
 
     memory_context = json.dumps(
@@ -1635,7 +1665,6 @@ def replace_single_menu_item(
     )
 
     if len(memory_context) > 30000:
-
         memory_context = memory_context[:30000]
 
     type_names = {
@@ -1718,7 +1747,6 @@ def replace_single_menu_item(
         answer = response.output_text.strip()
 
         if not answer:
-
             return None
 
         return answer
@@ -1739,7 +1767,8 @@ def replace_single_menu_item(
 
 async def send_long_message(
     message,
-    text
+    text,
+    reply_markup=None
 ):
 
     max_length = 3900
@@ -1747,10 +1776,13 @@ async def send_long_message(
     if len(text) <= max_length:
 
         await message.reply_text(
-            text
+            text,
+            reply_markup=reply_markup
         )
 
         return
+
+    first = True
 
     while len(text) > max_length:
 
@@ -1761,7 +1793,6 @@ async def send_long_message(
         )
 
         if cut < 1000:
-
             cut = max_length
 
         part = text[:cut]
@@ -1770,15 +1801,42 @@ async def send_long_message(
             part
         )
 
-        text = text[
-            cut:
-        ].lstrip()
+        text = text[cut:].lstrip()
+
+        first = False
 
     if text:
 
         await message.reply_text(
-            text
+            text,
+            reply_markup=reply_markup
         )
+
+
+# ============================================================
+# ФОРМАТ ПРОДУКТОВ
+# ============================================================
+
+def format_food_at_home(food):
+
+    if not food:
+
+        return (
+            "🏠 Сейчас в списке продуктов дома ничего нет."
+        )
+
+    lines = [
+        "🏠 <b>Что есть дома:</b>",
+        ""
+    ]
+
+    for name, amount in food.items():
+
+        lines.append(
+            f"• {name}: {amount}"
+        )
+
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1790,15 +1848,554 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    context.user_data.pop(
+        "replacement_type",
+        None
+    )
+
+    context.user_data.pop(
+        "awaiting_input",
+        None
+    )
+
     await update.message.reply_text(
         "Привет! 🍽️\n\n"
         "Я помощник Марианны и Павла по меню.\n\n"
-        "Я запоминаю ваши данные, продукты дома, "
-        "предпочтения, оценки и историю меню.\n\n"
-        "Также можно заменить отдельное блюдо "
-        "в текущем цикле, не меняя всё меню.\n\n"
-        "Напиши мне что-нибудь!"
+        "Выбирай нужное действие:",
+        reply_markup=main_keyboard()
     )
+
+
+# ============================================================
+# НОВЫЙ ЦИКЛ
+# ============================================================
+
+async def generate_new_cycle(
+    update,
+    context,
+    user_id,
+    memory_data
+):
+
+    await update.message.reply_text(
+        "Готовлю новый цикл на 3 дня 🍽️\n"
+        "Учитываю продукты дома, ваши предпочтения "
+        "и предыдущие меню..."
+    )
+
+    memory_context = json.dumps(
+        memory_data,
+        ensure_ascii=False,
+        separators=(",", ":")
+    )
+
+    if len(memory_context) > 30000:
+
+        print(
+            "WARNING: MEMORY TOO LARGE:",
+            len(memory_context)
+        )
+
+        memory_context = memory_context[:30000]
+
+    prompt = f"""
+ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
+
+{memory_context}
+
+ПОЛЬЗОВАТЕЛЬ ПРОСИТ СОСТАВИТЬ НОВЫЙ ЦИКЛ
+НА 3 ДНЯ.
+
+Составь полный новый цикл на 3 дня.
+
+Обязательно:
+- учитывай память;
+- учитывай продукты дома;
+- учитывай предпочтения;
+- учитывай оценки;
+- учитывай историю меню;
+- не повторяй недавно использованные основные блюда без необходимости;
+- соблюдай все ограничения Марианны;
+- учитывай цель Павла;
+- минимизируй количество готовки.
+
+После создания меню оно станет текущим меню.
+
+Отвечай сразу готовым меню на русском языке.
+"""
+
+    try:
+
+        response = client.responses.create(
+            model="gpt-5-mini",
+            instructions=SYSTEM_PROMPT,
+            input=prompt
+        )
+
+        answer = response.output_text.strip()
+
+    except Exception as e:
+
+        print(
+            "OPENAI ERROR:",
+            repr(e)
+        )
+
+        await update.message.reply_text(
+            "Произошла ошибка при создании меню 😔",
+            reply_markup=main_keyboard()
+        )
+
+        return
+
+    old_menu = memory_data[
+        "shared"
+    ].get(
+        "current_menu"
+    )
+
+    if old_menu:
+
+        memory_data[
+            "shared"
+        ][
+            "menu_history"
+        ].append(
+            old_menu
+        )
+
+    memory_data[
+        "shared"
+    ][
+        "current_menu"
+    ] = answer
+
+    save_user_memory(
+        user_id,
+        memory_data
+    )
+
+    print(
+        "NEW MENU SAVED AS CURRENT MENU"
+    )
+
+    await send_long_message(
+        update.message,
+        answer,
+        reply_markup=main_keyboard()
+    )
+
+
+# ============================================================
+# CALLBACK — КНОПКИ
+# ============================================================
+
+async def button_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    query = update.callback_query
+
+    await query.answer()
+
+    data = query.data
+
+    # ========================================================
+    # ГЛАВНОЕ МЕНЮ
+    # ========================================================
+
+    if data == "main_menu":
+
+        context.user_data.pop(
+            "replacement_type",
+            None
+        )
+
+        context.user_data.pop(
+            "awaiting_input",
+            None
+        )
+
+        await query.edit_message_text(
+            "🍽️ <b>Главное меню</b>\n\n"
+            "Что будем делать?",
+            reply_markup=main_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # НОВЫЙ ЦИКЛ
+    # ========================================================
+
+    if data == "new_cycle":
+
+        context.user_data.pop(
+            "replacement_type",
+            None
+        )
+
+        context.user_data.pop(
+            "awaiting_input",
+            None
+        )
+
+        user_id = str(
+            update.effective_user.id
+        )
+
+        memory_data = load_user_memory(
+            user_id,
+            update.effective_user.first_name
+        )
+
+        await query.edit_message_text(
+            "🆕 <b>Новый цикл на 3 дня</b>\n\n"
+            "Составляю меню..."
+        )
+
+        memory_context = json.dumps(
+            memory_data,
+            ensure_ascii=False,
+            separators=(",", ":")
+        )
+
+        if len(memory_context) > 30000:
+            memory_context = memory_context[:30000]
+
+        prompt = f"""
+ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
+
+{memory_context}
+
+ПОЛЬЗОВАТЕЛЬ ПРОСИТ СОСТАВИТЬ НОВЫЙ ЦИКЛ
+НА 3 ДНЯ.
+
+Составь полный новый цикл на 3 дня.
+
+Обязательно:
+- учитывай память;
+- учитывай продукты дома;
+- учитывай предпочтения;
+- учитывай оценки;
+- учитывай историю меню;
+- не повторяй недавно использованные основные блюда без необходимости;
+- соблюдай все ограничения Марианны;
+- учитывай цель Павла;
+- минимизируй количество готовки.
+
+После создания меню оно станет текущим меню.
+
+Отвечай сразу готовым меню на русском языке.
+"""
+
+        try:
+
+            response = client.responses.create(
+                model="gpt-5-mini",
+                instructions=SYSTEM_PROMPT,
+                input=prompt
+            )
+
+            answer = response.output_text.strip()
+
+        except Exception as e:
+
+            print(
+                "NEW CYCLE ERROR:",
+                repr(e)
+            )
+
+            await query.message.reply_text(
+                "Произошла ошибка при создании меню 😔",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        old_menu = memory_data[
+            "shared"
+        ].get(
+            "current_menu"
+        )
+
+        if old_menu:
+
+            memory_data[
+                "shared"
+            ][
+                "menu_history"
+            ].append(
+                old_menu
+            )
+
+        memory_data[
+            "shared"
+        ][
+            "current_menu"
+        ] = answer
+
+        save_user_memory(
+            user_id,
+            memory_data
+        )
+
+        await send_long_message(
+            query.message,
+            answer,
+            reply_markup=main_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ЗАМЕНА БЛЮДА — МЕНЮ
+    # ========================================================
+
+    if data == "replace_menu":
+
+        await query.edit_message_text(
+            "🔄 <b>Что заменить?</b>\n\n"
+            "Выбери только один элемент текущего цикла:",
+            reply_markup=replace_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # КОНКРЕТНЫЙ ТИП ЗАМЕНЫ
+    # ========================================================
+
+    replacement_map = {
+        "replace_breakfast": (
+            "breakfast",
+            "🍳 Завтрак Павла"
+        ),
+        "replace_main": (
+            "main",
+            "🍗 Основное блюдо"
+        ),
+        "replace_snack": (
+            "marianna_snack",
+            "🥨 Закуска Марианны"
+        ),
+        "replace_vegetables": (
+            "pavel_vegetables",
+            "🥦 Овощи Павла"
+        )
+    }
+
+    if data in replacement_map:
+
+        replacement_type, title = replacement_map[data]
+
+        user_id = str(
+            update.effective_user.id
+        )
+
+        memory_data = load_user_memory(
+            user_id,
+            update.effective_user.first_name
+        )
+
+        current_menu = memory_data[
+            "shared"
+        ].get(
+            "current_menu"
+        )
+
+        if not current_menu:
+
+            await query.edit_message_text(
+                "У нас сейчас нет сохранённого "
+                "текущего меню 😔\n\n"
+                "Сначала создай новый цикл.",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        context.user_data[
+            "replacement_type"
+        ] = replacement_type
+
+        context.user_data[
+            "awaiting_input"
+        ] = "replacement"
+
+        await query.edit_message_text(
+            f"{title}\n\n"
+            "Напиши, на что заменить.\n\n"
+            "Например:\n"
+            "• «на сырники»\n"
+            "• «на куриные котлеты»\n"
+            "• «давай другой»\n\n"
+            "Если конкретное блюдо не укажешь — "
+            "я сама выберу подходящее.",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ПРОДУКТЫ
+    # ========================================================
+
+    if data == "products":
+
+        await query.edit_message_text(
+            "🛒 <b>Продукты</b>\n\n"
+            "Что хочешь сделать?",
+            reply_markup=products_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ЧТО ЕСТЬ ДОМА
+    # ========================================================
+
+    if data == "food_home":
+
+        user_id = str(
+            update.effective_user.id
+        )
+
+        memory_data = load_user_memory(
+            user_id,
+            update.effective_user.first_name
+        )
+
+        food = memory_data[
+            "shared"
+        ].get(
+            "food_at_home",
+            {}
+        )
+
+        await query.edit_message_text(
+            format_food_at_home(food),
+            parse_mode="HTML",
+            reply_markup=products_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ИЗМЕНИТЬ ПРОДУКТЫ
+    # ========================================================
+
+    if data == "edit_food":
+
+        context.user_data[
+            "awaiting_input"
+        ] = "food"
+
+        await query.edit_message_text(
+            "✏️ <b>Изменить продукты</b>\n\n"
+            "Просто напиши, что изменилось.\n\n"
+            "Например:\n"
+            "• «Купили 2 кг куриного филе»\n"
+            "• «Купили яйца и сыр»\n"
+            "• «Куриное филе закончилось»\n"
+            "• «Осталось 500 г сыра»\n\n"
+            "Я обновлю продукты в памяти.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ПРЕДПОЧТЕНИЯ
+    # ========================================================
+
+    if data == "preferences":
+
+        await query.edit_message_text(
+            "❤️ <b>Предпочтения</b>\n\n"
+            "Чьи предпочтения хочешь изменить?",
+            parse_mode="HTML",
+            reply_markup=preferences_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # МАРИАННА
+    # ========================================================
+
+    if data == "pref_marianna":
+
+        context.user_data[
+            "awaiting_input"
+        ] = "marianna_preferences"
+
+        await query.edit_message_text(
+            "👩 <b>Предпочтения Марианны</b>\n\n"
+            "Напиши, что хочешь добавить, изменить "
+            "или удалить.\n\n"
+            "Например:\n"
+            "• «Марианне нравится лазанья»\n"
+            "• «Марианна больше не хочет есть сырники»\n"
+            "• «Марианна любит курицу»\n"
+            "• «Забудь, что Марианне нравится лазанья»",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ПАВЕЛ
+    # ========================================================
+
+    if data == "pref_pavel":
+
+        context.user_data[
+            "awaiting_input"
+        ] = "pavel_preferences"
+
+        await query.edit_message_text(
+            "👨 <b>Предпочтения Павла</b>\n\n"
+            "Напиши, что хочешь добавить, изменить "
+            "или удалить.\n\n"
+            "Например:\n"
+            "• «Павлу нравится паста»\n"
+            "• «Павел не любит жирные соусы»\n"
+            "• «Павлу надоели котлеты»\n"
+            "• «Забудь, что Павел любит рис»",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
+    # ========================================================
+    # ОЦЕНКА БЛЮДА
+    # ========================================================
+
+    if data == "rate_dish":
+
+        context.user_data[
+            "awaiting_input"
+        ] = "rating"
+
+        await query.edit_message_text(
+            "⭐ <b>Оценить блюдо</b>\n\n"
+            "Напиши, кто и как оценил блюдо.\n\n"
+            "Например:\n"
+            "❤️ «Марианне очень понравились сырники»\n"
+            "🙂 «Павлу нормально»\n"
+            "😐 «Марианне не понравились котлеты»\n"
+            "🚫 «Павлу больше никогда не готовить пасту»\n\n"
+            "Последняя оценка будет заменять предыдущую.",
+            parse_mode="HTML",
+            reply_markup=back_keyboard()
+        )
+
+        return
 
 
 # ============================================================
@@ -1830,7 +2427,23 @@ async def chat(
     )
 
     # ========================================================
-    # 1. Загружаем память
+    # Состояние после кнопки
+    # ========================================================
+
+    replacement_type_from_button = (
+        context.user_data.get(
+            "replacement_type"
+        )
+    )
+
+    awaiting_input = (
+        context.user_data.get(
+            "awaiting_input"
+        )
+    )
+
+    # ========================================================
+    # Загружаем память
     # ========================================================
 
     memory_data = load_user_memory(
@@ -1839,7 +2452,7 @@ async def chat(
     )
 
     # ========================================================
-    # 2. Память
+    # Память
     # ========================================================
 
     operations = extract_memory_operations(
@@ -1879,7 +2492,112 @@ async def chat(
             )
 
     # ========================================================
-    # 3. Если спрашивают текущее меню
+    # Если после кнопки выбран тип замены
+    # ========================================================
+
+    if replacement_type_from_button:
+
+        current_menu = memory_data[
+            "shared"
+        ].get(
+            "current_menu"
+        )
+
+        if not current_menu:
+
+            context.user_data.pop(
+                "replacement_type",
+                None
+            )
+
+            context.user_data.pop(
+                "awaiting_input",
+                None
+            )
+
+            await update.message.reply_text(
+                "У нас сейчас нет сохранённого "
+                "текущего меню 😔\n\n"
+                "Сначала создай новый цикл.",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        await update.message.reply_text(
+            "🔄 Хорошо, заменяю только это блюдо..."
+        )
+
+        updated_menu = replace_single_menu_item(
+            current_menu,
+            user_message,
+            replacement_type_from_button,
+            memory_data
+        )
+
+        context.user_data.pop(
+            "replacement_type",
+            None
+        )
+
+        context.user_data.pop(
+            "awaiting_input",
+            None
+        )
+
+        if updated_menu:
+
+            old_menu = memory_data[
+                "shared"
+            ].get(
+                "current_menu"
+            )
+
+            if old_menu:
+
+                memory_data[
+                    "shared"
+                ][
+                    "menu_history"
+                ].append(
+                    old_menu
+                )
+
+            memory_data[
+                "shared"
+            ][
+                "current_menu"
+            ] = updated_menu
+
+            save_user_memory(
+                user_id,
+                memory_data
+            )
+
+            print(
+                "CURRENT MENU UPDATED"
+            )
+
+            await send_long_message(
+                update.message,
+                updated_menu,
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        else:
+
+            await update.message.reply_text(
+                "Не получилось заменить блюдо 😔\n\n"
+                "Попробуй ещё раз.",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+    # ========================================================
+    # Если спрашивают текущее меню
     # ========================================================
 
     if is_current_menu_request(
@@ -1896,7 +2614,8 @@ async def chat(
 
             await send_long_message(
                 update.message,
-                current_menu
+                current_menu,
+                reply_markup=main_keyboard()
             )
 
             return
@@ -1905,14 +2624,15 @@ async def chat(
 
             await update.message.reply_text(
                 "Сейчас сохранённого меню нет 🍽️\n\n"
-                "Напиши «Новое меню», и я составлю "
-                "новый цикл на 3 дня."
+                "Нажми «🆕 Новый цикл на 3 дня», "
+                "и я составлю новый цикл.",
+                reply_markup=main_keyboard()
             )
 
             return
 
     # ========================================================
-    # 4. Если просят заменить блюдо
+    # Обычная текстовая замена
     # ========================================================
 
     replacement_type = (
@@ -1934,14 +2654,15 @@ async def chat(
             await update.message.reply_text(
                 "У нас сейчас нет сохранённого "
                 "текущего меню, поэтому мне нечего заменять 😔\n\n"
-                "Сначала напиши «Новое меню»."
+                "Нажми «🆕 Новый цикл на 3 дня».",
+                reply_markup=main_keyboard()
             )
 
             return
 
         await update.message.reply_text(
-            "Хорошо, заменяю только это блюдо "
-            "и сохраняю остальные элементы цикла 🍽️"
+            "🔄 Хорошо, заменяю только это блюдо "
+            "и сохраняю остальные элементы цикла..."
         )
 
         updated_menu = replace_single_menu_item(
@@ -1953,7 +2674,6 @@ async def chat(
 
         if updated_menu:
 
-            # Сохраняем старое меню в историю
             old_menu = memory_data[
                 "shared"
             ].get(
@@ -1970,7 +2690,6 @@ async def chat(
                     old_menu
                 )
 
-            # Новое меню становится текущим
             memory_data[
                 "shared"
             ][
@@ -1988,7 +2707,8 @@ async def chat(
 
             await send_long_message(
                 update.message,
-                updated_menu
+                updated_menu,
+                reply_markup=main_keyboard()
             )
 
             return
@@ -1998,13 +2718,14 @@ async def chat(
             await update.message.reply_text(
                 "Не получилось заменить блюдо 😔\n"
                 "Попробуй написать, например: "
-                "«Замени завтрак на сырники»."
+                "«Замени завтрак на сырники».",
+                reply_markup=main_keyboard()
             )
 
             return
 
     # ========================================================
-    # 5. Контекст памяти
+    # Контекст памяти
     # ========================================================
 
     memory_context = json.dumps(
@@ -2020,12 +2741,10 @@ async def chat(
             len(memory_context)
         )
 
-        memory_context = memory_context[
-            :30000
-        ]
+        memory_context = memory_context[:30000]
 
     # ========================================================
-    # 6. Основной запрос
+    # Основной запрос
     # ========================================================
 
     prompt = f"""
@@ -2066,7 +2785,7 @@ async def chat(
 """
 
     # ========================================================
-    # 7. Основной GPT
+    # Основной GPT
     # ========================================================
 
     try:
@@ -2091,13 +2810,14 @@ async def chat(
         )
 
         await update.message.reply_text(
-            "Произошла ошибка при обращении к ИИ 😔"
+            "Произошла ошибка при обращении к ИИ 😔",
+            reply_markup=main_keyboard()
         )
 
         return
 
     # ========================================================
-    # 8. Если это новое меню — сохраняем его
+    # Если это новое меню — сохраняем его
     # ========================================================
 
     if is_new_menu_request(
@@ -2110,7 +2830,6 @@ async def chat(
             "current_menu"
         )
 
-        # Старое меню отправляем в историю
         if old_menu:
 
             memory_data[
@@ -2121,7 +2840,6 @@ async def chat(
                 old_menu
             )
 
-        # Новое меню становится текущим
         memory_data[
             "shared"
         ][
@@ -2138,14 +2856,24 @@ async def chat(
         )
 
     # ========================================================
-    # 9. Отправляем ответ
+    # Сбрасываем режим ввода после кнопок
+    # ========================================================
+
+    context.user_data.pop(
+        "awaiting_input",
+        None
+    )
+
+    # ========================================================
+    # Отправляем ответ
     # ========================================================
 
     try:
 
         await send_long_message(
             update.message,
-            answer
+            answer,
+            reply_markup=main_keyboard()
         )
 
         print(
@@ -2189,6 +2917,12 @@ async def run_bot():
         CommandHandler(
             "start",
             start
+        )
+    )
+
+    application.add_handler(
+        CallbackQueryHandler(
+            button_handler
         )
     )
 
