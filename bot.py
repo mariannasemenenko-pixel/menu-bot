@@ -99,9 +99,7 @@ SYSTEM_PROMPT = """
 - овощное дополнение Павла;
 - хрустящая низкокалорийная закуска Марианны.
 
-Всё необходимое готовится один раз в первый день.
-
-В следующие два дня желательно только разогревать и раскладывать еду.
+Всё необходимое по возможности готовится один раз в первый день.
 
 ============================================================
 ПРИГОТОВЛЕНИЕ
@@ -338,6 +336,50 @@ SYSTEM_PROMPT = """
 
 
 ============================================================
+TELEGRAM HTML
+============================================================
+
+Меню будет отображаться в Telegram.
+
+ОБЯЗАТЕЛЬНО используй HTML-форматирование Telegram.
+
+Разрешены:
+<b>жирный</b>
+<i>курсив</i>
+<u>подчёркивание</u>
+
+Не используй Markdown для жирного текста.
+
+НЕ пиши:
+**жирный текст**
+
+Пиши:
+<b>жирный текст</b>
+
+Заголовки разделов всегда выделяй жирным:
+
+<b>🍽️ МЕНЮ НА 3 ДНЯ</b>
+<b>🛒 ПОКУПКИ НА 3 ДНЯ</b>
+<b>👨‍🍳 ПРИГОТОВЛЕНИЕ</b>
+<b>⚖️ ПОРЦИИ И КБЖУ</b>
+<b>📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1</b>
+
+Имена людей:
+
+🧑🏾‍🦱 <b>Марианна</b>
+👨 <b>Павел</b>
+
+Названия блюд можно выделять <b>жирным</b>.
+
+Для важных итогов используй <b>жирный</b>.
+
+Не используй Markdown-таблицы.
+
+Не используй тройные обратные кавычки.
+
+Не используй другие HTML-теги, кроме b, i и u.
+
+============================================================
 1. 🍽️ МЕНЮ НА 3 ДНЯ
 ============================================================
 
@@ -356,21 +398,21 @@ SYSTEM_PROMPT = """
 
 Используй формат:
 
-🍽️ МЕНЮ НА 3 ДНЯ
+<b>🍽️ МЕНЮ НА 3 ДНЯ</b>
 
-🍳 Завтрак Павла
+🍳 <b>Завтрак Павла</b>
 [название блюда]
 
-🍗 Основное
+🍗 <b>Основное</b>
 [название блюда]
 
-🥔 Гарнир
+🥔 <b>Гарнир</b>
 [название блюда]
 
-🥨 Закуска Марианны
+🥨 <b>Закуска Марианны</b>
 [название блюда]
 
-🥦 Овощи Павла
+🥦 <b>Овощи Павла</b>
 [название блюда]
 
 Не добавляй сюда ничего лишнего.
@@ -401,18 +443,24 @@ SYSTEM_PROMPT = """
 
 Используй формат:
 
-🛒 ПОКУПКИ НА 3 ДНЯ
+<b>🛒 ПОКУПКИ НА 3 ДНЯ</b>
 
-🥩 Мясо
+🥩 <b>Мясо и рыба</b>
 • ...
 
-🥛 Молочное
+🥛 <b>Молочное и яйца</b>
 • ...
 
-🥔 Овощи
+🥔 <b>Овощи и корнеплоды</b>
 • ...
 
-🥫 Бакалея
+🥖 <b>Хлеб и выпечка</b>
+• ...
+
+🥣 <b>Крупы и бакалея</b>
+• ...
+
+🥫 <b>Масла, специи и соусы</b>
 • ...
 
 При необходимости используй дополнительные категории.
@@ -436,72 +484,83 @@ SYSTEM_PROMPT = """
 
 Даже если блюдо очень простое.
 
-Это необходимо для того, чтобы было понятно, сколько именно приготовить на весь цикл.
+Это необходимо для того, чтобы было понятно, сколько именно приготовить
+на весь цикл.
 
 Каждое блюдо оформляй как отдельный компактный блок.
 
 Используй формат:
 
-👨‍🍳 ПРИГОТОВЛЕНИЕ
+<b>👨‍🍳 ПРИГОТОВЛЕНИЕ</b>
 
-🍳 Завтрак Павла
+🍳 <b>Завтрак Павла</b>
 
-Ингредиенты:
+<b>Ингредиенты:</b>
 • ...
 • ...
 
-Как готовить:
+<b>Как готовить:</b>
 1. ...
 2. ...
 3. ...
 
-🍗 Основное
+🍗 <b>Основное</b>
 
-Ингредиенты:
+<b>Ингредиенты:</b>
 • ...
 • ...
 
-Как готовить:
+<b>Как готовить:</b>
 1. ...
 2. ...
 3. ...
 
-🥔 Гарнир
+🥔 <b>Гарнир</b>
 
-Ингредиенты:
+<b>Ингредиенты:</b>
 • ...
 • ...
 
-Как готовить:
+<b>Как готовить:</b>
 1. ...
 2. ...
 3. ...
 
-🥨 Закуска Марианны
+🥨 <b>Закуска Марианны</b>
 
-Ингредиенты:
+<b>Ингредиенты:</b>
 • ...
 • ...
 
-Как готовить:
+<b>Как готовить:</b>
 1. ...
 2. ...
 
-🥦 Овощи Павла
+🥦 <b>Овощи Павла</b>
 
-Ингредиенты:
+<b>Ингредиенты:</b>
 • ...
 • ...
 
-Как готовить:
+<b>Как готовить:</b>
 1. ...
 2. ...
 
-Для каждого блюда указывай количество ингредиентов, необходимое для приготовления ВСЕГО объёма на 3 дня.
+Для каждого блюда указывай количество ингредиентов,
+необходимое для приготовления ВСЕГО объёма на 3 дня.
 
 Не описывай приготовление отдельно для каждого дня.
 
 Всё необходимое по возможности готовится в День 1.
+
+НЕ добавляй:
+- контейнеры;
+- раскладывание по контейнерам;
+- разложить по порциям;
+- упаковку еды;
+- инструкции по хранению;
+- инструкции по разогреву;
+- температуру и время разогрева в следующие дни.
 
 
 ============================================================
@@ -514,46 +573,46 @@ SYSTEM_PROMPT = """
 
 Используй формат:
 
-⚖️ ПОРЦИИ И КБЖУ
+<b>⚖️ ПОРЦИИ И КБЖУ</b>
 
-👩 Марианна
+🧑🏾‍🦱 <b>Марианна</b>
 
-🍗 Основное
+🍗 <b>Основное</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🥔 Гарнир
+🥔 <b>Гарнир</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🥨 Закуска
+🥨 <b>Закуска</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🔥 Итого за день
+<b>🔥 Итого за день</b>
 [ккал]
 Б [г] / Ж [г] / У [г]
 
 
-👨 Павел
+👨 <b>Павел</b>
 
-🍳 Завтрак
+🍳 <b>Завтрак</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🍗 Основное
+🍗 <b>Основное</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🥔 Гарнир
+🥔 <b>Гарнир</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🥦 Овощи
+🥦 <b>Овощи</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🔥 Итого за день
+<b>🔥 Итого за день</b>
 [ккал]
 Б [г] / Ж [г] / У [г]
 
@@ -561,9 +620,10 @@ SYSTEM_PROMPT = """
 
 Не придумывай произвольные КБЖУ.
 
-Размер порции должен соответствовать рассчитанному количеству готового блюда.
+Размер порции должен соответствовать рассчитанному количеству продукта.
 
-Если блюдо разделяется между Марианной и Павлом, учитывай фактическую долю каждого человека.
+Если блюдо разделяется между Марианной и Павлом,
+учитывай фактическую долю каждого человека.
 
 
 ============================================================
@@ -572,13 +632,14 @@ SYSTEM_PROMPT = """
 
 В конце каждого полного меню обязательно добавляй:
 
-📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1
+<b>📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1</b>
 
-Коротко перечисли ВСЁ, что необходимо приготовить или подготовить заранее на все 3 дня.
+Коротко перечисли ВСЁ, что необходимо приготовить или подготовить заранее
+на все 3 дня.
 
 Например:
 
-📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1
+<b>📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1</b>
 
 • Курица — 900 г готового блюда
 • Картофель — 750 г готового
@@ -586,15 +647,21 @@ SYSTEM_PROMPT = """
 • Сырники — 3 порции
 • Закуска Марианны — 3 порции
 
-В Дни 2–3:
-только достать нужную порцию и разогреть.
-
-Если какой-либо элемент не требует приготовления, всё равно укажи его.
+Если какой-либо элемент не требует приготовления,
+всё равно укажи его.
 
 Например:
 
-• Хлебцы — 3 порции
-• Творожный сыр — 3 порции
+• Хлебцы — 3 дневные порции
+• Творожный сыр — 3 дневные порции
+
+НЕ пиши:
+- контейнеры;
+- разложить по контейнерам;
+- разложить по порциям;
+- хранение;
+- разогрев;
+- «В Дни 2–3 только достать и разогреть».
 
 
 ============================================================
@@ -624,7 +691,7 @@ SYSTEM_PROMPT = """
 
 Если пользователь просит именно меню — сразу начинай с:
 
-🍽️ МЕНЮ НА 3 ДНЯ
+<b>🍽️ МЕНЮ НА 3 ДНЯ</b>
 
 Каждый раздел должен быть компактным и легко читаемым в Telegram.
 
@@ -636,7 +703,8 @@ SYSTEM_PROMPT = """
 
 Используй обычный текст и списки.
 
-При замене одного блюда сохраняй эту же структуру полного меню, но изменяй ТОЛЬКО запрошенный элемент.
+При замене одного блюда сохраняй эту же структуру полного меню,
+но изменяй ТОЛЬКО запрошенный элемент.
 
 
 ============================================================
@@ -773,7 +841,7 @@ def preferences_keyboard():
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "👩  Марианна",
+                "🧑🏾‍🦱  Марианна",
                 callback_data="pref_marianna"
             )
         ],
@@ -807,6 +875,178 @@ def back_keyboard():
             )
         ]
     ])
+
+
+# ============================================================
+# РАЗДЕЛЫ МЕНЮ — РАСКРЫТИЕ / СВОРАЧИВАНИЕ
+# ============================================================
+
+MENU_SECTIONS = {
+    "shopping": {
+        "title": "🛒 Покупки на 3 дня",
+        "heading": "🛒 ПОКУПКИ НА 3 ДНЯ",
+        "button": "🛒 Покупки на 3 дня"
+    },
+    "cooking": {
+        "title": "👨‍🍳 Приготовление",
+        "heading": "👨‍🍳 ПРИГОТОВЛЕНИЕ",
+        "button": "👨‍🍳 Приготовление"
+    },
+    "nutrition": {
+        "title": "⚖️ Порции и КБЖУ",
+        "heading": "⚖️ ПОРЦИИ И КБЖУ",
+        "button": "⚖️ Порции и КБЖУ"
+    },
+    "day1": {
+        "title": "📦 Что приготовить в День 1",
+        "heading": "📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1",
+        "button": "📦 Что приготовить в День 1"
+    }
+}
+
+
+def extract_menu_sections(text):
+
+    headings = [
+        "🍽️ МЕНЮ НА 3 ДНЯ",
+        "🛒 ПОКУПКИ НА 3 ДНЯ",
+        "👨‍🍳 ПРИГОТОВЛЕНИЕ",
+        "⚖️ ПОРЦИИ И КБЖУ",
+        "📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1"
+    ]
+
+    positions = []
+
+    for heading in headings:
+
+        patterns = [
+            heading,
+            f"<b>{heading}</b>"
+        ]
+
+        found = None
+
+        for pattern in patterns:
+
+            index = text.find(pattern)
+
+            if index != -1:
+                found = index
+                break
+
+        if found is not None:
+            positions.append(
+                (found, heading)
+            )
+
+    positions.sort(key=lambda x: x[0])
+
+    sections = {}
+
+    for i, (start, heading) in enumerate(positions):
+
+        end = (
+            positions[i + 1][0]
+            if i + 1 < len(positions)
+            else len(text)
+        )
+
+        section_text = text[start:end].strip()
+
+        if heading == "🍽️ МЕНЮ НА 3 ДНЯ":
+            sections["menu"] = section_text
+
+        elif heading == "🛒 ПОКУПКИ НА 3 ДНЯ":
+            sections["shopping"] = section_text
+
+        elif heading == "👨‍🍳 ПРИГОТОВЛЕНИЕ":
+            sections["cooking"] = section_text
+
+        elif heading == "⚖️ ПОРЦИИ И КБЖУ":
+            sections["nutrition"] = section_text
+
+        elif heading == "📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1":
+            sections["day1"] = section_text
+
+    return sections
+
+
+def collapsed_section_keyboard():
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "▶️ Показать покупки",
+                callback_data="expand_shopping"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "▶️ Показать приготовление",
+                callback_data="expand_cooking"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "▶️ Показать порции и КБЖУ",
+                callback_data="expand_nutrition"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "▶️ Показать День 1",
+                callback_data="expand_day1"
+            )
+        ]
+    ])
+
+
+def section_keyboard(section_key):
+
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "🔼 Свернуть",
+                callback_data=f"collapse_{section_key}"
+            )
+        ]
+    ])
+
+
+async def send_menu(message, text):
+
+    sections = extract_menu_sections(text)
+
+    if "menu" not in sections:
+
+        await send_long_message(
+            message,
+            text,
+            reply_markup=main_keyboard()
+        )
+
+        return
+
+    await message.reply_text(
+        sections["menu"],
+        parse_mode="HTML"
+    )
+
+    collapsed_text = (
+        "📋 <b>Подробности меню</b>\n\n"
+        "Нажми на нужный раздел, чтобы раскрыть его."
+    )
+
+    await message.reply_text(
+        collapsed_text,
+        parse_mode="HTML",
+        reply_markup=collapsed_section_keyboard()
+    )
+
+    await message.reply_text(
+        "Что будем делать дальше?",
+        reply_markup=main_keyboard()
+    )
 
 
 # ============================================================
@@ -2091,7 +2331,8 @@ def replace_single_menu_item(
 async def send_long_message(
     message,
     text,
-    reply_markup=None
+    reply_markup=None,
+    parse_mode="HTML"
 ):
 
     max_length = 3900
@@ -2100,12 +2341,11 @@ async def send_long_message(
 
         await message.reply_text(
             text,
+            parse_mode=parse_mode,
             reply_markup=reply_markup
         )
 
         return
-
-    first = True
 
     while len(text) > max_length:
 
@@ -2121,17 +2361,17 @@ async def send_long_message(
         part = text[:cut]
 
         await message.reply_text(
-            part
+            part,
+            parse_mode=parse_mode
         )
 
         text = text[cut:].lstrip()
-
-        first = False
 
     if text:
 
         await message.reply_text(
             text,
+            parse_mode=parse_mode,
             reply_markup=reply_markup
         )
 
@@ -2302,10 +2542,9 @@ async def generate_new_cycle(
         "NEW MENU SAVED AS CURRENT MENU"
     )
 
-    await send_long_message(
+    await send_menu(
         update.message,
-        answer,
-        reply_markup=main_keyboard()
+        answer
     )
 
 
@@ -2323,6 +2562,110 @@ async def button_handler(
     await query.answer()
 
     data = query.data
+
+    # ========================================================
+    # РАСКРЫТИЕ РАЗДЕЛА МЕНЮ
+    # ========================================================
+
+    if data.startswith("expand_"):
+
+        section_key = data.replace(
+            "expand_",
+            "",
+            1
+        )
+
+        if section_key not in MENU_SECTIONS:
+            return
+
+        user_id = str(
+            update.effective_user.id
+        )
+
+        memory_data = load_user_memory(
+            user_id,
+            update.effective_user.first_name
+        )
+
+        current_menu = memory_data[
+            "shared"
+        ].get(
+            "current_menu"
+        )
+
+        if not current_menu:
+
+            await query.edit_message_text(
+                "Текущее меню больше не найдено 😔",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        sections = extract_menu_sections(
+            current_menu
+        )
+
+        section_text = sections.get(
+            section_key
+        )
+
+        if not section_text:
+
+            await query.edit_message_text(
+                "Не удалось найти этот раздел 😔",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        await query.edit_message_text(
+            section_text,
+            parse_mode="HTML",
+            reply_markup=section_keyboard(
+                section_key
+            )
+        )
+
+        return
+
+
+    # ========================================================
+    # СВОРАЧИВАНИЕ РАЗДЕЛА МЕНЮ
+    # ========================================================
+
+    if data.startswith("collapse_"):
+
+        section_key = data.replace(
+            "collapse_",
+            "",
+            1
+        )
+
+        if section_key not in MENU_SECTIONS:
+            return
+
+        collapsed_text = (
+            "📋 <b>Раздел свёрнут</b>\n\n"
+            f"{MENU_SECTIONS[section_key]['title']}\n\n"
+            "Нажми ниже, чтобы снова раскрыть."
+        )
+
+        await query.edit_message_text(
+            collapsed_text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "▶️ Показать",
+                        callback_data=f"expand_{section_key}"
+                    )
+                ]
+            ])
+        )
+
+        return
+
 
     # ========================================================
     # ГЛАВНОЕ МЕНЮ
@@ -2343,6 +2686,7 @@ async def button_handler(
         await query.edit_message_text(
             "🍽️ <b>Главное меню</b>\n\n"
             "Что будем делать?",
+            parse_mode="HTML",
             reply_markup=main_keyboard()
         )
 
@@ -2375,7 +2719,8 @@ async def button_handler(
 
         await query.edit_message_text(
             "🆕 <b>Новый цикл на 3 дня</b>\n\n"
-            "Составляю меню..."
+            "Составляю меню...",
+            parse_mode="HTML"
         )
 
         memory_context = json.dumps(
@@ -2464,10 +2809,9 @@ async def button_handler(
             memory_data
         )
 
-        await send_long_message(
+        await send_menu(
             query.message,
-            answer,
-            reply_markup=main_keyboard()
+            answer
         )
 
         return
@@ -2481,6 +2825,7 @@ async def button_handler(
         await query.edit_message_text(
             "🔄 <b>Что заменить?</b>\n\n"
             "Выбери только один элемент текущего цикла:",
+            parse_mode="HTML",
             reply_markup=replace_keyboard()
         )
 
@@ -2570,6 +2915,7 @@ async def button_handler(
         await query.edit_message_text(
             "🛒 <b>Продукты</b>\n\n"
             "Что хочешь сделать?",
+            parse_mode="HTML",
             reply_markup=products_keyboard()
         )
 
@@ -2656,7 +3002,7 @@ async def button_handler(
         ] = "marianna_preferences"
 
         await query.edit_message_text(
-            "👩 <b>Предпочтения Марианны</b>\n\n"
+            "🧑🏾‍🦱 <b>Предпочтения Марианны</b>\n\n"
             "Напиши, что хочешь добавить, изменить "
             "или удалить.\n\n"
             "Например:\n"
@@ -2901,10 +3247,9 @@ async def chat(
                 "CURRENT MENU UPDATED"
             )
 
-            await send_long_message(
+            await send_menu(
                 update.message,
-                updated_menu,
-                reply_markup=main_keyboard()
+                updated_menu
             )
 
             return
@@ -2935,10 +3280,9 @@ async def chat(
 
         if current_menu:
 
-            await send_long_message(
+            await send_menu(
                 update.message,
-                current_menu,
-                reply_markup=main_keyboard()
+                current_menu
             )
 
             return
@@ -3028,10 +3372,9 @@ async def chat(
                 "CURRENT MENU UPDATED"
             )
 
-            await send_long_message(
+            await send_menu(
                 update.message,
-                updated_menu,
-                reply_markup=main_keyboard()
+                updated_menu
             )
 
             return
@@ -3193,11 +3536,20 @@ async def chat(
 
     try:
 
-        await send_long_message(
-            update.message,
-            answer,
-            reply_markup=main_keyboard()
-        )
+        if is_new_menu_request(user_message):
+
+            await send_menu(
+                update.message,
+                answer
+            )
+
+        else:
+
+            await send_long_message(
+                update.message,
+                answer,
+                reply_markup=main_keyboard()
+            )
 
         print(
             "TELEGRAM RESPONSE SENT"
