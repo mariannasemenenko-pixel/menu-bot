@@ -353,7 +353,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = client.responses.create(
-            model="gpt-5-mini",
+            model="gpt-5.6-luna",
             instructions=SYSTEM_PROMPT,
             input=user_message,
         )
