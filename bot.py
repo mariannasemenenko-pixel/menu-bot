@@ -2,7 +2,7 @@ import os
 import asyncio
 import json
 
-from flask import Flask
+from flask import Flask, request
 from openai import OpenAI
 
 from telegram import Update
@@ -262,22 +262,39 @@ SYSTEM_PROMPT = """
 def load_memory():
     try:
         with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
+            data = json.load(f)
+
+            if not isinstance(data, dict):
+                raise ValueError("Invalid memory format")
+
+            if "users" not in data:
+                data["users"] = {}
+
+            return data
+
+    except Exception:
         return {
-            "users": {},
-            "food_preferences": [],
-            "dislikes": [],
-            "liked_dishes": [],
+            "users": {}
         }
 
 
-def save_memory(memory):
+def save_memory():
     with open(MEMORY_FILE, "w", encoding="utf-8") as f:
         json.dump(memory, f, ensure_ascii=False, indent=2)
 
 
 memory = load_memory()
+
+
+def get_user_memory(user_id, first_name):
+    if user_id not in memory["users"]:
+        memory["users"][user_id] = {
+            "name": first_name,
+            "profile": {}
+        }
+        save_memory()
+
+    return memory["users"][user_id]
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -291,21 +308,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
+
     user_id = str(update.effective_user.id)
     user_message = update.message.text
 
-    if user_id not in memory["users"]:
-        memory["users"][user_id] = {
-            "name": update.effective_user.first_name,
-            "profile": {},
-        }
-
-    user_memory = memory["users"][user_id]
+    user_memory = get_user_memory(
+        user_id,
+        update.effective_user.first_name
+    )
 
     memory_context = json.dumps(
         user_memory,
         ensure_ascii=False,
-        indent=2
+        separators=(",", ":")
     )
 
     prompt = f"""
@@ -317,75 +334,96 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 {user_message}
 
-Используй сохранённые данные и НЕ спрашивай повторно то,
-что уже известно.
+Используй сохранённые данные.
 
-Если пользователь сообщает новую постоянную информацию,
-которую нужно запомнить, обязательно укажи её в специальном
-блоке в конце ответа:
-
-MEMORY_UPDATE:
-{{"ключ": "значение"}}
-
-Если новых данных для сохранения нет, напиши:
-
-MEMORY_UPDATE:
-{{}}
-
+ВАЖНО:
+- Не спрашивай повторно данные, которые уже есть в сохранённом профиле.
+- Если пользователь сообщает новые постоянные данные, используй их.
+- Если пользователь явно меняет старые данные, используй новые.
+- Не нужно объяснять пользователю техническую работу памяти.
 """
 
     try:
+        print("MESSAGE:", user_message)
+
         response = client.responses.create(
             model="gpt-5-mini",
             instructions=SYSTEM_PROMPT,
             input=prompt,
         )
 
-        answer = response.output_text
+        answer = response.output_text.strip()
 
-        # Пытаемся найти обновление памяти
-        if "MEMORY_UPDATE:" in answer:
-            parts = answer.split("MEMORY_UPDATE:", 1)
-            visible_answer = parts[0].strip()
-            memory_update_text = parts[1].strip()
+        print("OPENAI OK")
 
-            try:
-                memory_update = json.loads(memory_update_text)
+        if not answer:
+            await update.message.reply_text(
+                "ИИ не вернул текстовый ответ 😔"
+            )
+            return
 
-                if isinstance(memory_update, dict):
-                    user_memory["profile"].update(memory_update)
-                    save_memory(memory)
+        # Telegram ограничивает длину одного сообщения.
+        # Разбиваем длинные ответы на части.
+        max_length = 3900
 
-            except Exception as memory_error:
-                print("MEMORY ERROR:", repr(memory_error))
+        chunks = [
+            answer[i:i + max_length]
+            for i in range(0, len(answer), max_length)
+        ]
 
-            answer = visible_answer
-
-        # Telegram не принимает сообщения длиннее ~4096 символов.
-        # Поэтому длинные ответы отправляем несколькими сообщениями.
-        max_length = 4000
-
-        for i in range(0, len(answer), max_length):
-            chunk = answer[i:i + max_length]
+        for chunk in chunks:
             await update.message.reply_text(chunk)
 
     except Exception as e:
         print("BOT ERROR:", repr(e))
 
-        await update.message.reply_text(
-            "Произошла ошибка 😔 Попробуй ещё раз."
-        )
+        try:
+            await update.message.reply_text(
+                "Произошла ошибка 😔 Попробуй ещё раз."
+            )
+        except Exception as telegram_error:
+            print("TELEGRAM ERROR:", repr(telegram_error))
 
 
 app = Flask(__name__)
 
 
-@app.route("/")
+@app.route("/", methods=["GET"])
 def home():
     return "Menu bot is alive!"
 
 
-async def run_bot():
+application = None
+
+
+async def process_update(update_data):
+    global application
+
+    update = Update.de_json(
+        update_data,
+        application.bot
+    )
+
+    await application.process_update(update)
+
+
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
+    try:
+        update_data = request.get_json(force=True)
+
+        asyncio.run(process_update(update_data))
+
+        return "OK", 200
+
+    except Exception as e:
+        print("WEBHOOK ERROR:", repr(e))
+        return "ERROR", 500
+
+
+async def setup_bot():
+    global application
+
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -405,15 +443,12 @@ async def run_bot():
 
     await application.initialize()
     await application.start()
-    await application.updater.start_polling()
 
-    print("Telegram bot started!")
-
-    await asyncio.Event().wait()
+    print("Telegram webhook bot started!")
 
 
 async def main():
-    bot_task = asyncio.create_task(run_bot())
+    await setup_bot()
 
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
