@@ -36,7 +36,11 @@ client = OpenAI(
     api_key=OPENAI_API_KEY,
     timeout=60.0
 )
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+supabase = create_client(
+    SUPABASE_URL,
+    SUPABASE_KEY
+)
 
 
 # ============================================================
@@ -336,7 +340,6 @@ SYSTEM_PROMPT = """
 3. 👨‍🍳 ПРИГОТОВЛЕНИЕ
 4. ⚖️ ПОРЦИИ И КБЖУ
 5. 📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1
-
 
 ============================================================
 TELEGRAM HTML
@@ -777,7 +780,7 @@ def main_keyboard():
             InlineKeyboardButton(
                 "❤️  Предпочтения",
                 callback_data="preferences"
-            )
+            ),
         ],
     ])
 
@@ -1545,10 +1548,6 @@ def apply_memory_updates(
 
         action = operation.get("action")
 
-        # ====================================================
-        # ADD / UPDATE
-        # ====================================================
-
         if action in [
             "add",
             "update"
@@ -1680,10 +1679,6 @@ def apply_memory_updates(
                             "menu_history"
                         ].extend(value)
 
-        # ====================================================
-        # DELETE
-        # ====================================================
-
         elif action == "delete":
 
             person = operation.get("person")
@@ -1814,10 +1809,6 @@ def apply_memory_updates(
                         )
                     )
 
-        # ====================================================
-        # DELETE ALL DISH
-        # ====================================================
-
         elif action == "delete_all_dish":
 
             dish = operation.get("dish")
@@ -1830,10 +1821,6 @@ def apply_memory_updates(
                         dish
                     )
                 )
-
-        # ====================================================
-        # CLEAR FOOD
-        # ====================================================
 
         elif action == "clear_food":
 
@@ -2055,10 +2042,10 @@ clear_food
 
     try:
 
-       response = await asyncio.to_thread(
-    client.responses.create,
-    model="gpt-5-mini",
-    instructions="""
+        response = await asyncio.to_thread(
+            client.responses.create,
+            model="gpt-5-mini",
+            instructions="""
 Ты — модуль управления памятью.
 
 Возвращай только валидный JSON.
@@ -2066,8 +2053,8 @@ clear_food
 Без пояснений.
 Не придумывай данные.
 """,
-    input=prompt
-)
+            input=prompt
+        )
 
         text = response.output_text.strip()
 
@@ -2306,11 +2293,11 @@ async def replace_single_menu_item(
     try:
 
         response = await asyncio.to_thread(
-    client.responses.create,
-    model="gpt-5-mini",
-    instructions=SYSTEM_PROMPT,
-    input=prompt
-)
+            client.responses.create,
+            model="gpt-5-mini",
+            instructions=SYSTEM_PROMPT,
+            input=prompt
+        )
 
         answer = response.output_text.strip()
 
@@ -2494,7 +2481,8 @@ async def generate_new_cycle(
 
     try:
 
-        response = client.responses.create(
+        response = await asyncio.to_thread(
+            client.responses.create,
             model="gpt-5-mini",
             instructions=SYSTEM_PROMPT,
             input=prompt
@@ -2766,11 +2754,11 @@ async def button_handler(
         try:
 
             response = await asyncio.to_thread(
-    client.responses.create,
-    model="gpt-5-mini",
-    instructions=SYSTEM_PROMPT,
-    input=prompt
-)
+                client.responses.create,
+                model="gpt-5-mini",
+                instructions=SYSTEM_PROMPT,
+                input=prompt
+            )
 
             answer = response.output_text.strip()
 
@@ -3131,8 +3119,8 @@ async def chat(
     # ========================================================
 
     operations = await extract_memory_operations(
-    user_message,
-    memory_data
+        user_message,
+        memory_data
     )
 
     print(
@@ -3463,11 +3451,11 @@ async def chat(
     try:
 
         response = await asyncio.to_thread(
-    client.responses.create,
-    model="gpt-5-mini",
-    instructions=SYSTEM_PROMPT,
-    input=prompt
-)
+            client.responses.create,
+            model="gpt-5-mini",
+            instructions=SYSTEM_PROMPT,
+            input=prompt
+        )
 
         answer = response.output_text.strip()
 
