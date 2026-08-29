@@ -320,8 +320,18 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 Используй сохранённые данные и НЕ спрашивай повторно то,
 что уже известно.
 
-Если пользователь сообщает новую постоянную информацию о себе,
-определи её и используй её в будущих ответах.
+Если пользователь сообщает новую постоянную информацию,
+которую нужно запомнить, обязательно укажи её в специальном
+блоке в конце ответа:
+
+MEMORY_UPDATE:
+{{"ключ": "значение"}}
+
+Если новых данных для сохранения нет, напиши:
+
+MEMORY_UPDATE:
+{{}}
+
 """
 
     try:
@@ -333,13 +343,37 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         answer = response.output_text
 
-        await update.message.reply_text(answer)
+        # Пытаемся найти обновление памяти
+        if "MEMORY_UPDATE:" in answer:
+            parts = answer.split("MEMORY_UPDATE:", 1)
+            visible_answer = parts[0].strip()
+            memory_update_text = parts[1].strip()
+
+            try:
+                memory_update = json.loads(memory_update_text)
+
+                if isinstance(memory_update, dict):
+                    user_memory["profile"].update(memory_update)
+                    save_memory(memory)
+
+            except Exception as memory_error:
+                print("MEMORY ERROR:", repr(memory_error))
+
+            answer = visible_answer
+
+        # Telegram не принимает сообщения длиннее ~4096 символов.
+        # Поэтому длинные ответы отправляем несколькими сообщениями.
+        max_length = 4000
+
+        for i in range(0, len(answer), max_length):
+            chunk = answer[i:i + max_length]
+            await update.message.reply_text(chunk)
 
     except Exception as e:
-        print("OPENAI ERROR:", repr(e))
+        print("BOT ERROR:", repr(e))
 
         await update.message.reply_text(
-            "Произошла ошибка при обращении к ИИ 😔"
+            "Произошла ошибка 😔 Попробуй ещё раз."
         )
 
 
