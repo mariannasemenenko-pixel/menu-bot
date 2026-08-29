@@ -1,14 +1,16 @@
 import os
+import asyncio
 
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler
 
-app = Flask(__name__)
 
-telegram_app = (
+TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+
+application = (
     Application.builder()
-    .token(os.environ["TELEGRAM_BOT_TOKEN"])
+    .token(TOKEN)
     .updater(None)
     .build()
 )
@@ -17,9 +19,9 @@ telegram_app = (
 async def start(update: Update, context):
     await update.message.reply_text(
         "Привет! 🍽️\n\n"
-        "Я будущий помощник по меню Марианны и Павла.\n"
-        "Пока я только учусь, но скоро буду составлять "
-        "меню, рецепты и списки покупок."
+        "Я будущий помощник по меню Марианны и Павла.\n\n"
+        "Пока я умею только здороваться 😄\n"
+        "Но скоро научусь составлять меню, рецепты и списки покупок."
     )
 
 
@@ -31,39 +33,44 @@ async def help_command(update: Update, context):
     )
 
 
-telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(CommandHandler("help", help_command))
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("help", help_command))
 
 
-@app.route("/")
+flask_app = Flask(__name__)
+
+
+@flask_app.route("/")
 def home():
     return "Menu bot is alive!"
 
 
-@app.route("/telegram", methods=["POST"])
+@flask_app.route("/telegram", methods=["POST"])
 async def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, telegram_app.bot)
+    update = Update.de_json(
+        request.get_json(),
+        application.bot
+    )
 
-    await telegram_app.process_update(update)
+    await application.update_queue.put(update)
 
     return "OK"
 
 
+async def run():
+    await application.initialize()
+    await application.start()
+
+    port = int(os.environ.get("PORT", 10000))
+
+    from hypercorn.asyncio import serve
+    from hypercorn.config import Config
+
+    config = Config()
+    config.bind = [f"0.0.0.0:{port}"]
+
+    await serve(flask_app, config)
+
+
 if __name__ == "__main__":
-    import asyncio
-    from werkzeug.serving import run_simple
-
-    async def main():
-        await telegram_app.initialize()
-
-        port = int(os.environ.get("PORT", 10000))
-
-        run_simple(
-            "0.0.0.0",
-            port,
-            app,
-            threaded=False,
-        )
-
-    asyncio.run(main())
+    asyncio.run(run())
