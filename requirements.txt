@@ -1,3 +1,4 @@
 python-telegram-bot==22.5
-Flask[async]==3.1.2
+Flask==3.1.2
 hypercorn==0.17.3
+openai
