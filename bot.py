@@ -32,7 +32,10 @@ OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(
+    api_key=OPENAI_API_KEY,
+    timeout=60.0
+)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
@@ -1847,7 +1850,7 @@ def apply_memory_updates(
 # OPENAI — ПАМЯТЬ
 # ============================================================
 
-def extract_memory_operations(
+async def extract_memory_operations(
     user_message,
     current_memory
 ):
@@ -2052,9 +2055,10 @@ clear_food
 
     try:
 
-        response = client.responses.create(
-            model="gpt-5-mini",
-            instructions="""
+       response = await asyncio.to_thread(
+    client.responses.create,
+    model="gpt-5-mini",
+    instructions="""
 Ты — модуль управления памятью.
 
 Возвращай только валидный JSON.
@@ -2062,8 +2066,8 @@ clear_food
 Без пояснений.
 Не придумывай данные.
 """,
-            input=prompt
-        )
+    input=prompt
+)
 
         text = response.output_text.strip()
 
@@ -2211,7 +2215,7 @@ def is_current_menu_request(user_message):
 # ЗАМЕНА ОДНОГО ЭЛЕМЕНТА
 # ============================================================
 
-def replace_single_menu_item(
+async def replace_single_menu_item(
     current_menu,
     user_message,
     replacement_type,
@@ -2301,11 +2305,12 @@ def replace_single_menu_item(
 
     try:
 
-        response = client.responses.create(
-            model="gpt-5-mini",
-            instructions=SYSTEM_PROMPT,
-            input=prompt
-        )
+        response = await asyncio.to_thread(
+    client.responses.create,
+    model="gpt-5-mini",
+    instructions=SYSTEM_PROMPT,
+    input=prompt
+)
 
         answer = response.output_text.strip()
 
@@ -2760,11 +2765,12 @@ async def button_handler(
 
         try:
 
-            response = client.responses.create(
-                model="gpt-5-mini",
-                instructions=SYSTEM_PROMPT,
-                input=prompt
-            )
+            response = await asyncio.to_thread(
+    client.responses.create,
+    model="gpt-5-mini",
+    instructions=SYSTEM_PROMPT,
+    input=prompt
+)
 
             answer = response.output_text.strip()
 
@@ -3124,9 +3130,9 @@ async def chat(
     # Память
     # ========================================================
 
-    operations = extract_memory_operations(
-        user_message,
-        memory_data
+    operations = await extract_memory_operations(
+    user_message,
+    memory_data
     )
 
     print(
@@ -3197,7 +3203,7 @@ async def chat(
             "🔄 Хорошо, заменяю только это блюдо..."
         )
 
-        updated_menu = replace_single_menu_item(
+        updated_menu = await replace_single_menu_item(
             current_menu,
             user_message,
             replacement_type_from_button,
@@ -3332,7 +3338,7 @@ async def chat(
             "и сохраняю остальные элементы цикла..."
         )
 
-        updated_menu = replace_single_menu_item(
+        updated_menu = await replace_single_menu_item(
             current_menu,
             user_message,
             replacement_type,
@@ -3456,11 +3462,12 @@ async def chat(
 
     try:
 
-        response = client.responses.create(
-            model="gpt-5-mini",
-            instructions=SYSTEM_PROMPT,
-            input=prompt
-        )
+        response = await asyncio.to_thread(
+    client.responses.create,
+    model="gpt-5-mini",
+    instructions=SYSTEM_PROMPT,
+    input=prompt
+)
 
         answer = response.output_text.strip()
 
