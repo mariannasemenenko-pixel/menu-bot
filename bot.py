@@ -2,6 +2,7 @@ import os
 import asyncio
 import json
 import re
+import time
 
 from flask import Flask
 from openai import OpenAI
@@ -884,7 +885,7 @@ def back_keyboard():
 
 
 # ============================================================
-# РАЗДЕЛЫ МЕНЮ — РАСКРЫТИЕ / СВОРАЧИВАНИЕ
+# РАЗДЕЛЫ МЕНЮ
 # ============================================================
 
 MENU_SECTIONS = {
@@ -1059,9 +1060,10 @@ async def send_menu(message, text):
 # SUPABASE — ЗАГРУЗКА
 # ============================================================
 
-def load_user_memory(user_id, first_name):
+def load_user_memory_sync(user_id, first_name):
 
     try:
+
         result = (
             supabase
             .table("bot_memory")
@@ -1080,13 +1082,33 @@ def load_user_memory(user_id, first_name):
 
     except Exception as e:
 
-        print("SUPABASE LOAD ERROR:", repr(e))
+        print(
+            "SUPABASE LOAD ERROR:",
+            repr(e)
+        )
 
     data = empty_memory()
 
     data["marianna"]["other"]["user_name"] = first_name
 
     return data
+
+
+async def load_user_memory(user_id, first_name):
+
+    started = time.monotonic()
+
+    result = await asyncio.to_thread(
+        load_user_memory_sync,
+        user_id,
+        first_name
+    )
+
+    print(
+        f"SUPABASE LOAD: {time.monotonic() - started:.2f}s"
+    )
+
+    return result
 
 
 # ============================================================
@@ -1160,7 +1182,7 @@ def migrate_memory(old_memory):
 # SUPABASE — СОХРАНЕНИЕ
 # ============================================================
 
-def save_user_memory(user_id, memory_data):
+def save_user_memory_sync(user_id, memory_data):
 
     try:
 
@@ -1205,6 +1227,21 @@ def save_user_memory(user_id, memory_data):
             "SUPABASE SAVE ERROR:",
             repr(e)
         )
+
+
+async def save_user_memory(user_id, memory_data):
+
+    started = time.monotonic()
+
+    await asyncio.to_thread(
+        save_user_memory_sync,
+        user_id,
+        memory_data
+    )
+
+    print(
+        f"SUPABASE SAVE: {time.monotonic() - started:.2f}s"
+    )
 
 
 # ============================================================
@@ -1842,6 +1879,8 @@ async def extract_memory_operations(
     current_memory
 ):
 
+    started = time.monotonic()
+
     compact_memory = json.dumps(
         current_memory,
         ensure_ascii=False,
@@ -2079,6 +2118,10 @@ clear_food
         if not isinstance(operations, list):
             return []
 
+        print(
+            f"OPENAI MEMORY: {time.monotonic() - started:.2f}s"
+        )
+
         return operations
 
     except Exception as e:
@@ -2086,6 +2129,11 @@ clear_food
         print(
             "MEMORY EXTRACTION ERROR:",
             repr(e)
+        )
+
+        print(
+            f"OPENAI MEMORY ERROR AFTER: "
+            f"{time.monotonic() - started:.2f}s"
         )
 
         return []
@@ -2290,6 +2338,8 @@ async def replace_single_menu_item(
 Отвечай на русском языке.
 """
 
+    started = time.monotonic()
+
     try:
 
         response = await asyncio.to_thread(
@@ -2301,6 +2351,11 @@ async def replace_single_menu_item(
 
         answer = response.output_text.strip()
 
+        print(
+            f"OPENAI REPLACEMENT: "
+            f"{time.monotonic() - started:.2f}s"
+        )
+
         if not answer:
             return None
 
@@ -2311,6 +2366,11 @@ async def replace_single_menu_item(
         print(
             "MENU REPLACEMENT ERROR:",
             repr(e)
+        )
+
+        print(
+            f"OPENAI REPLACEMENT ERROR AFTER: "
+            f"{time.monotonic() - started:.2f}s"
         )
 
         return None
@@ -2426,13 +2486,12 @@ async def start(
 # ============================================================
 
 async def generate_new_cycle(
-    update,
-    context,
+    message,
     user_id,
     memory_data
 ):
 
-    await update.message.reply_text(
+    await message.reply_text(
         "Готовлю новый цикл на 3 дня 🍽️\n"
         "Учитываю продукты дома, ваши предпочтения "
         "и предыдущие меню..."
@@ -2479,6 +2538,8 @@ async def generate_new_cycle(
 Отвечай сразу готовым меню на русском языке.
 """
 
+    started = time.monotonic()
+
     try:
 
         response = await asyncio.to_thread(
@@ -2490,14 +2551,24 @@ async def generate_new_cycle(
 
         answer = response.output_text.strip()
 
+        print(
+            f"OPENAI NEW MENU: "
+            f"{time.monotonic() - started:.2f}s"
+        )
+
     except Exception as e:
 
         print(
-            "OPENAI ERROR:",
+            "OPENAI NEW MENU ERROR:",
             repr(e)
         )
 
-        await update.message.reply_text(
+        print(
+            f"OPENAI NEW MENU ERROR AFTER: "
+            f"{time.monotonic() - started:.2f}s"
+        )
+
+        await message.reply_text(
             "Произошла ошибка при создании меню 😔",
             reply_markup=main_keyboard()
         )
@@ -2526,7 +2597,7 @@ async def generate_new_cycle(
         "current_menu"
     ] = answer
 
-    save_user_memory(
+    await save_user_memory(
         user_id,
         memory_data
     )
@@ -2536,7 +2607,7 @@ async def generate_new_cycle(
     )
 
     await send_menu(
-        update.message,
+        message,
         answer
     )
 
@@ -2575,7 +2646,7 @@ async def button_handler(
             update.effective_user.id
         )
 
-        memory_data = load_user_memory(
+        memory_data = await load_user_memory(
             user_id,
             update.effective_user.first_name
         )
@@ -2624,7 +2695,7 @@ async def button_handler(
 
 
     # ========================================================
-    # СВОРАЧИВАНИЕ РАЗДЕЛА МЕНЮ
+    # СВОРАЧИВАНИЕ РАЗДЕЛА
     # ========================================================
 
     if data.startswith("collapse_"):
@@ -2685,6 +2756,7 @@ async def button_handler(
 
         return
 
+
     # ========================================================
     # НОВЫЙ ЦИКЛ
     # ========================================================
@@ -2705,9 +2777,16 @@ async def button_handler(
             update.effective_user.id
         )
 
-        memory_data = load_user_memory(
+        started = time.monotonic()
+
+        memory_data = await load_user_memory(
             user_id,
             update.effective_user.first_name
+        )
+
+        print(
+            f"NEW CYCLE PREP: "
+            f"{time.monotonic() - started:.2f}s"
         )
 
         await query.edit_message_text(
@@ -2716,99 +2795,14 @@ async def button_handler(
             parse_mode="HTML"
         )
 
-        memory_context = json.dumps(
-            memory_data,
-            ensure_ascii=False,
-            separators=(",", ":")
-        )
-
-        if len(memory_context) > 30000:
-            memory_context = memory_context[:30000]
-
-        prompt = f"""
-ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
-
-{memory_context}
-
-ПОЛЬЗОВАТЕЛЬ ПРОСИТ СОСТАВИТЬ НОВЫЙ ЦИКЛ
-НА 3 ДНЯ.
-
-Составь полный новый цикл на 3 дня.
-
-Обязательно:
-- учитывай память;
-- учитывай продукты дома;
-- учитывай предпочтения;
-- учитывай оценки;
-- учитывай историю меню;
-- не повторяй недавно использованные основные блюда без необходимости;
-- соблюдай все ограничения Марианны;
-- учитывай цель Павла;
-- минимизируй количество готовки.
-
-После создания меню оно станет текущим меню.
-
-Отвечай сразу готовым меню на русском языке.
-"""
-
-        try:
-
-            response = await asyncio.to_thread(
-                client.responses.create,
-                model="gpt-5-mini",
-                instructions=SYSTEM_PROMPT,
-                input=prompt
-            )
-
-            answer = response.output_text.strip()
-
-        except Exception as e:
-
-            print(
-                "NEW CYCLE ERROR:",
-                repr(e)
-            )
-
-            await query.message.reply_text(
-                "Произошла ошибка при создании меню 😔",
-                reply_markup=main_keyboard()
-            )
-
-            return
-
-        old_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
-
-        if old_menu:
-
-            memory_data[
-                "shared"
-            ][
-                "menu_history"
-            ].append(
-                old_menu
-            )
-
-        memory_data[
-            "shared"
-        ][
-            "current_menu"
-        ] = answer
-
-        save_user_memory(
+        await generate_new_cycle(
+            query.message,
             user_id,
             memory_data
         )
 
-        await send_menu(
-            query.message,
-            answer
-        )
-
         return
+
 
     # ========================================================
     # ЗАМЕНА БЛЮДА — МЕНЮ
@@ -2824,6 +2818,7 @@ async def button_handler(
         )
 
         return
+
 
     # ========================================================
     # КОНКРЕТНЫЙ ТИП ЗАМЕНЫ
@@ -2856,7 +2851,7 @@ async def button_handler(
             update.effective_user.id
         )
 
-        memory_data = load_user_memory(
+        memory_data = await load_user_memory(
             user_id,
             update.effective_user.first_name
         )
@@ -2900,6 +2895,7 @@ async def button_handler(
 
         return
 
+
     # ========================================================
     # ПРОДУКТЫ
     # ========================================================
@@ -2915,6 +2911,7 @@ async def button_handler(
 
         return
 
+
     # ========================================================
     # ЧТО ЕСТЬ ДОМА
     # ========================================================
@@ -2925,7 +2922,7 @@ async def button_handler(
             update.effective_user.id
         )
 
-        memory_data = load_user_memory(
+        memory_data = await load_user_memory(
             user_id,
             update.effective_user.first_name
         )
@@ -2944,6 +2941,7 @@ async def button_handler(
         )
 
         return
+
 
     # ========================================================
     # ИЗМЕНИТЬ ПРОДУКТЫ
@@ -2970,6 +2968,7 @@ async def button_handler(
 
         return
 
+
     # ========================================================
     # ПРЕДПОЧТЕНИЯ
     # ========================================================
@@ -2984,6 +2983,7 @@ async def button_handler(
         )
 
         return
+
 
     # ========================================================
     # МАРИАННА
@@ -3010,6 +3010,7 @@ async def button_handler(
 
         return
 
+
     # ========================================================
     # ПАВЕЛ
     # ========================================================
@@ -3034,6 +3035,7 @@ async def button_handler(
         )
 
         return
+
 
     # ========================================================
     # ОЦЕНКА БЛЮДА
@@ -3076,6 +3078,8 @@ async def chat(
     if not update.message.text:
         return
 
+    total_started = time.monotonic()
+
     user_id = str(
         update.effective_user.id
     )
@@ -3085,8 +3089,17 @@ async def chat(
     )
 
     print(
+        "========================================"
+    )
+
+    print(
         "MESSAGE:",
         user_message
+    )
+
+    print(
+        "USER ID:",
+        user_id
     )
 
     # ========================================================
@@ -3099,60 +3112,94 @@ async def chat(
         )
     )
 
-    awaiting_input = (
-        context.user_data.get(
-            "awaiting_input"
-        )
-    )
-
     # ========================================================
     # Загружаем память
     # ========================================================
 
-    memory_data = load_user_memory(
+    memory_data = await load_user_memory(
         user_id,
         update.effective_user.first_name
     )
 
     # ========================================================
-    # Память
+    # БЫСТРЫЕ КОМАНДЫ
+    #
+    # ВАЖНО:
+    # Здесь намеренно НЕ вызываем GPT для анализа памяти.
     # ========================================================
 
-    operations = await extract_memory_operations(
-        user_message,
-        memory_data
-    )
+    # --------------------------------------------------------
+    # Текущее меню
+    # --------------------------------------------------------
 
-    print(
-        "MEMORY OPERATIONS:",
-        operations
-    )
+    if is_current_menu_request(
+        user_message
+    ):
 
-    if operations:
-
-        old_memory = json.dumps(
-            memory_data,
-            ensure_ascii=False,
-            sort_keys=True
+        current_menu = memory_data[
+            "shared"
+        ].get(
+            "current_menu"
         )
 
-        memory_data = apply_memory_updates(
-            memory_data,
-            operations
-        )
+        if current_menu:
 
-        new_memory = json.dumps(
-            memory_data,
-            ensure_ascii=False,
-            sort_keys=True
-        )
-
-        if old_memory != new_memory:
-
-            save_user_memory(
-                user_id,
-                memory_data
+            print(
+                "FAST ROUTE: CURRENT MENU"
             )
+
+            await send_menu(
+                update.message,
+                current_menu
+            )
+
+            print(
+                f"TOTAL: "
+                f"{time.monotonic() - total_started:.2f}s"
+            )
+
+            return
+
+        else:
+
+            await update.message.reply_text(
+                "Сейчас сохранённого меню нет 🍽️\n\n"
+                "Нажми «🆕 Новый цикл на 3 дня», "
+                "и я составлю новый цикл.",
+                reply_markup=main_keyboard()
+            )
+
+            print(
+                f"TOTAL: "
+                f"{time.monotonic() - total_started:.2f}s"
+            )
+
+            return
+
+    # --------------------------------------------------------
+    # Новое меню
+    # --------------------------------------------------------
+
+    if is_new_menu_request(
+        user_message
+    ):
+
+        print(
+            "FAST ROUTE: NEW MENU"
+        )
+
+        await generate_new_cycle(
+            update.message,
+            user_id,
+            memory_data
+        )
+
+        print(
+            f"TOTAL: "
+            f"{time.monotonic() - total_started:.2f}s"
+        )
+
+        return
 
     # ========================================================
     # Если после кнопки выбран тип замены
@@ -3232,7 +3279,7 @@ async def chat(
                 "current_menu"
             ] = updated_menu
 
-            save_user_memory(
+            await save_user_memory(
                 user_id,
                 memory_data
             )
@@ -3246,6 +3293,11 @@ async def chat(
                 updated_menu
             )
 
+            print(
+                f"TOTAL: "
+                f"{time.monotonic() - total_started:.2f}s"
+            )
+
             return
 
         else:
@@ -3253,40 +3305,6 @@ async def chat(
             await update.message.reply_text(
                 "Не получилось заменить блюдо 😔\n\n"
                 "Попробуй ещё раз.",
-                reply_markup=main_keyboard()
-            )
-
-            return
-
-    # ========================================================
-    # Если спрашивают текущее меню
-    # ========================================================
-
-    if is_current_menu_request(
-        user_message
-    ):
-
-        current_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
-
-        if current_menu:
-
-            await send_menu(
-                update.message,
-                current_menu
-            )
-
-            return
-
-        else:
-
-            await update.message.reply_text(
-                "Сейчас сохранённого меню нет 🍽️\n\n"
-                "Нажми «🆕 Новый цикл на 3 дня», "
-                "и я составлю новый цикл.",
                 reply_markup=main_keyboard()
             )
 
@@ -3357,7 +3375,7 @@ async def chat(
                 "current_menu"
             ] = updated_menu
 
-            save_user_memory(
+            await save_user_memory(
                 user_id,
                 memory_data
             )
@@ -3369,6 +3387,11 @@ async def chat(
             await send_menu(
                 update.message,
                 updated_menu
+            )
+
+            print(
+                f"TOTAL: "
+                f"{time.monotonic() - total_started:.2f}s"
             )
 
             return
@@ -3383,6 +3406,56 @@ async def chat(
             )
 
             return
+
+    # ========================================================
+    # ПАМЯТЬ
+    #
+    # Только теперь вызываем отдельный GPT для определения,
+    # нужно ли что-то сохранить.
+    # ========================================================
+
+    memory_started = time.monotonic()
+
+    operations = await extract_memory_operations(
+        user_message,
+        memory_data
+    )
+
+    print(
+        "MEMORY OPERATIONS:",
+        operations
+    )
+
+    print(
+        f"MEMORY STEP TOTAL: "
+        f"{time.monotonic() - memory_started:.2f}s"
+    )
+
+    if operations:
+
+        old_memory = json.dumps(
+            memory_data,
+            ensure_ascii=False,
+            sort_keys=True
+        )
+
+        memory_data = apply_memory_updates(
+            memory_data,
+            operations
+        )
+
+        new_memory = json.dumps(
+            memory_data,
+            ensure_ascii=False,
+            sort_keys=True
+        )
+
+        if old_memory != new_memory:
+
+            await save_user_memory(
+                user_id,
+                memory_data
+            )
 
     # ========================================================
     # Контекст памяти
@@ -3448,6 +3521,8 @@ async def chat(
     # Основной GPT
     # ========================================================
 
+    started = time.monotonic()
+
     try:
 
         response = await asyncio.to_thread(
@@ -3460,7 +3535,8 @@ async def chat(
         answer = response.output_text.strip()
 
         print(
-            "OPENAI OK"
+            f"OPENAI MAIN: "
+            f"{time.monotonic() - started:.2f}s"
         )
 
     except Exception as e:
@@ -3468,6 +3544,11 @@ async def chat(
         print(
             "OPENAI ERROR:",
             repr(e)
+        )
+
+        print(
+            f"OPENAI MAIN ERROR AFTER: "
+            f"{time.monotonic() - started:.2f}s"
         )
 
         await update.message.reply_text(
@@ -3507,7 +3588,7 @@ async def chat(
             "current_menu"
         ] = answer
 
-        save_user_memory(
+        await save_user_memory(
             user_id,
             memory_data
         )
@@ -3517,7 +3598,7 @@ async def chat(
         )
 
     # ========================================================
-    # Сбрасываем режим ввода после кнопок
+    # Сбрасываем режим ввода
     # ========================================================
 
     context.user_data.pop(
@@ -3531,20 +3612,11 @@ async def chat(
 
     try:
 
-        if is_new_menu_request(user_message):
-
-            await send_menu(
-                update.message,
-                answer
-            )
-
-        else:
-
-            await send_long_message(
-                update.message,
-                answer,
-                reply_markup=main_keyboard()
-            )
+        await send_long_message(
+            update.message,
+            answer,
+            reply_markup=main_keyboard()
+        )
 
         print(
             "TELEGRAM RESPONSE SENT"
@@ -3556,6 +3628,15 @@ async def chat(
             "TELEGRAM ERROR:",
             repr(e)
         )
+
+    print(
+        f"TOTAL REQUEST TIME: "
+        f"{time.monotonic() - total_started:.2f}s"
+    )
+
+    print(
+        "========================================"
+    )
 
 
 # ============================================================
@@ -3603,17 +3684,96 @@ async def run_bot():
         )
     )
 
-    await application.initialize()
+    try:
 
-    await application.start()
+        print(
+            "Starting Telegram application..."
+        )
 
-    await application.updater.start_polling()
+        await application.initialize()
 
-    print(
-        "Telegram bot started!"
-    )
+        print(
+            "Telegram application initialized."
+        )
 
-    await asyncio.Event().wait()
+        await application.start()
+
+        print(
+            "Telegram application started."
+        )
+
+        await application.updater.start_polling()
+
+        print(
+            "Telegram bot started!"
+        )
+
+        # Держим Telegram-приложение живым.
+        await asyncio.Event().wait()
+
+    except asyncio.CancelledError:
+
+        print(
+            "Telegram bot task cancelled."
+        )
+
+        raise
+
+    except Exception as e:
+
+        print(
+            "TELEGRAM RUN ERROR:",
+            repr(e)
+        )
+
+        raise
+
+    finally:
+
+        print(
+            "Stopping Telegram bot..."
+        )
+
+        try:
+
+            if application.updater.running:
+
+                await application.updater.stop()
+
+        except Exception as e:
+
+            print(
+                "UPDATER STOP ERROR:",
+                repr(e)
+            )
+
+        try:
+
+            if application.running:
+
+                await application.stop()
+
+        except Exception as e:
+
+            print(
+                "APPLICATION STOP ERROR:",
+                repr(e)
+            )
+
+        try:
+
+            await application.shutdown()
+
+        except Exception as e:
+
+            print(
+                "APPLICATION SHUTDOWN ERROR:",
+                repr(e)
+            )
+
+        print(
+            "Telegram bot stopped."
+        )
 
 
 # ============================================================
@@ -3622,7 +3782,7 @@ async def run_bot():
 
 async def main():
 
-    asyncio.create_task(
+    bot_task = asyncio.create_task(
         run_bot()
     )
 
@@ -3635,10 +3795,42 @@ async def main():
         f"0.0.0.0:{os.environ.get('PORT', '10000')}"
     ]
 
-    await serve(
-        app,
-        config
-    )
+    try:
+
+        print(
+            "Starting Flask/Hypercorn server..."
+        )
+
+        await serve(
+            app,
+            config
+        )
+
+    finally:
+
+        print(
+            "Web server stopped. "
+            "Stopping Telegram task..."
+        )
+
+        if not bot_task.done():
+
+            bot_task.cancel()
+
+        try:
+
+            await bot_task
+
+        except asyncio.CancelledError:
+
+            pass
+
+        except Exception as e:
+
+            print(
+                "BOT TASK FINAL ERROR:",
+                repr(e)
+            )
 
 
 # ============================================================
@@ -3647,4 +3839,6 @@ async def main():
 
 if __name__ == "__main__":
 
-    asyncio.run(main())
+    asyncio.run(
+        main()
+    )
