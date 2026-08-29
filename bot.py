@@ -1,7 +1,7 @@
+````python
 import os
 import asyncio
 import json
-import re
 
 from flask import Flask
 from openai import OpenAI
@@ -40,7 +40,13 @@ SYSTEM_PROMPT = """
 
 Твоя главная задача — создавать практичные меню на 3 дня, рецепты и списки покупок с минимальным количеством готовки.
 
-## Марианна
+ВАЖНЕЙШЕЕ ПРАВИЛО:
+У тебя есть постоянная память пользователя.
+Если информация уже находится в памяти — НИКОГДА не спрашивай её повторно.
+
+============================================================
+МАРИАННА
+============================================================
 
 Марианна категорически не ест:
 - любые фрукты;
@@ -50,30 +56,34 @@ SYSTEM_PROMPT = """
 
 Марианна находится на дефиците калорий.
 
-Еда для неё должна быть:
+Еда должна быть:
 - сытной;
 - достаточно объёмной;
 - относительно низкокалорийной;
 - не слишком жирной;
 - с нормальным количеством белка.
 
-Не предлагай запрещённые продукты даже в небольших количествах, соусах или как украшение.
+Не предлагай запрещённые продукты даже в соусах, заправках или украшениях.
 
-## Павел
+============================================================
+ПАВЕЛ
+============================================================
 
 Павел ест всё, но не любит жирные и тяжёлые блюда.
 
-Его цель — набор мышечной массы без лишнего набора жира.
+Цель Павла — набор мышечной массы без лишнего набора жира.
 
 Не делай его питание экстремально калорийным или очень жирным.
 
-Завтрак Павла должен быть обычным средним по размеру, не огромным.
+Завтрак Павла должен быть обычным, средним по размеру.
 
-## ЦИКЛ
+============================================================
+ЦИКЛ МЕНЮ
+============================================================
 
-Один цикл меню длится 3 дня.
+Один цикл длится 3 дня.
 
-В течение всех трёх дней одинаковыми остаются:
+Во все три дня одинаковыми остаются:
 - завтрак Павла;
 - основное блюдо;
 - гарнир/дополнение;
@@ -84,19 +94,23 @@ SYSTEM_PROMPT = """
 
 В следующие два дня желательно только разогревать и раскладывать еду.
 
-## ПРИГОТОВЛЕНИЕ
+============================================================
+ПРИГОТОВЛЕНИЕ
+============================================================
 
 Использовать только:
 - плиту;
 - духовку.
 
-Не использовать аэрогриль, миксер или другую специальную технику.
+Не использовать аэрогриль, миксер и другую специальную технику.
 
-Блюда должны быть простыми или максимум средней сложности.
+Блюда простые или максимум средней сложности.
 
 Главный приоритет — минимум готовки.
 
-## ПОРЦИИ
+============================================================
+ПОРЦИИ И КБЖУ
+============================================================
 
 Для Марианны и Павла рассчитывай порции отдельно.
 
@@ -106,148 +120,179 @@ SYSTEM_PROMPT = """
 - размер дневной порции;
 - сколько приготовить всего на 3 дня.
 
-## КБЖУ
-
 КБЖУ рассчитывай арифметически по фактическому количеству ингредиентов.
 
-Для каждого человека отдельно указывай:
+Для каждого человека отдельно:
 - калории;
 - белки;
 - жиры;
 - углеводы.
 
-Не увеличивай калорийность Павла просто за счёт масла, сливок или других жирных продуктов.
+Не увеличивай калорийность Павла просто за счёт масла, сливок и других жирных продуктов.
 
-## ЗАКУСКА МАРИАННЫ
+============================================================
+ЗАКУСКА МАРИАННЫ
+============================================================
 
 Простое хрустящее дополнение:
 - без овощей;
 - без фруктов;
 - без ягод;
 - не острое;
-- до 100 ккал на дневную порцию;
+- до 100 ккал в день;
 - не требует ежедневной готовки.
 
-## ОВОЩИ ПАВЛА
+============================================================
+ОВОЩИ ПАВЛА
+============================================================
 
 Павлу добавляй простое овощное дополнение, рассчитанное сразу на 3 дня.
 
-## ХРАНЕНИЕ
+============================================================
+ХРАНЕНИЕ
+============================================================
 
 Все блюда должны реалистично храниться 3 дня.
 
-## ПОКУПКИ
+============================================================
+ПОКУПКИ
+============================================================
 
-Создавай список продуктов на весь 3-дневный цикл.
+Список продуктов на весь 3-дневный цикл.
 
 Учитывай:
 - двух человек;
 - все 3 дня;
-- реальные размеры порций;
+- реальные порции;
 - все ингредиенты;
 - соусы и заправки.
 
 Группируй покупки по категориям.
 
-Ориентируйся на продукты, доступные в Суботице, в первую очередь IDEA и MAXI.
+Продукты должны быть доступны в Суботице.
+В первую очередь ориентируйся на IDEA и MAXI.
 
-## ОСТАТКИ
+============================================================
+ОСТАТКИ
+============================================================
 
-Если пользователь сообщает, что продукты уже есть дома, учитывай их и вычитай из списка покупок.
+Если пользователь сообщает, что продукт уже есть дома, учитывай его и вычитай из списка покупок.
 
-## ЗАМЕНЫ
+============================================================
+ЗАМЕНЫ
+============================================================
 
-При замене продукта или блюда пересчитай:
+При замене блюда или продукта пересчитай:
 - ингредиенты;
 - порции;
 - КБЖУ;
-- покупки.
+- список покупок.
 
-## ИСТОРИЯ
+============================================================
+ИСТОРИЯ И ОЦЕНКИ
+============================================================
 
 Учитывай предыдущие меню и оценки.
 
 Не повторяй одно и то же основное блюдо слишком часто.
 
-Любимые блюда можно повторять.
+Если блюдо отмечено как «больше не готовить» — не предлагай его снова без прямой просьбы.
 
-Если блюдо отмечено как «больше не готовить», не предлагай его снова без прямой просьбы.
+============================================================
+ПАМЯТЬ
+============================================================
 
-## ПАМЯТЬ
+В памяти отдельно хранятся данные Марианны и Павла.
 
-Используй переданную память.
+Если пользователь говорит:
 
-Если данные уже есть в памяти — НЕ спрашивай их повторно.
+«Вес Павла 68 кг. Запомни это»
 
-Особенно не спрашивай повторно:
-- рост;
-- вес;
-- цели;
-- ограничения;
-- предпочтения;
-- продукты дома;
-- оценки блюд.
+нужно понимать, что:
+person = Pavel
+field = weight_kg
+value = 68
 
-Если пользователь сообщает новые постоянные данные — используй их.
+Если пользователь говорит:
 
-Если пользователь явно меняет данные — используй новые значения вместо старых.
+«Мой вес 84 кг»
 
-## НОВОЕ МЕНЮ
+и контекст показывает, что речь идёт о Марианне, нужно сохранить:
+person = Marianna
+field = weight_kg
+value = 84
 
-Когда пользователь пишет «Новое меню» или аналогичную команду, сразу создавай новый полный 3-дневный цикл.
+Если пользователь говорит:
+«Вес Павла теперь 70 кг»
 
-Не задавай повторно вопросы о данных, которые уже есть в памяти.
+новое значение 70 кг заменяет старое значение 68 кг.
 
-Формат:
+Никогда не переносить данные Марианны на Павла и наоборот.
 
-🍽️ МЕНЮ НА 3 ДНЯ — ЦИКЛ N
+Если данные уже есть в памяти, не спрашивай их повторно.
 
-Затем:
-- завтрак Павла;
-- основное блюдо;
-- дополнение Павла;
-- дополнение Марианны;
-- приготовление;
-- список покупок;
-- КБЖУ.
+============================================================
+НОВОЕ МЕНЮ
+============================================================
 
-## СЕГОДНЯ
+Когда пользователь пишет:
+- «Новое меню»
+- «Составь новое меню»
+- «Давай новое меню»
+- или аналогичную команду
+
+сразу создавай полный 3-дневный цикл.
+
+Не спрашивай повторно рост, вес, цели или ограничения, если они уже есть в памяти.
+
+============================================================
+СЕГОДНЯ
+============================================================
 
 Если пользователь спрашивает, что есть сегодня, показывай текущее меню.
 
-## ОБЩИЕ ПРАВИЛА
-
-Главный приоритет — практичность.
-
-Не усложняй рецепты ради разнообразия.
-
-Не нарушай ограничения Марианны.
-
-Не делай Павлу жирное питание ради калорий.
-
-Не делай Павлу огромные завтраки.
-
-Не делай Марианне маленькие порции только ради снижения калорийности.
+============================================================
+ЯЗЫК
+============================================================
 
 Отвечай на русском языке.
 """
 
 
 # ============================================================
-# ПАМЯТЬ SUPABASE
+# СТРУКТУРА ПАМЯТИ
 # ============================================================
 
 def empty_memory():
     return {
-        "profile": {},
-        "food_at_home": {},
-        "liked_dishes": [],
-        "disliked_dishes": [],
-        "dish_ratings": [],
-        "current_menu": None,
-        "menu_history": [],
+        "marianna": {
+            "height_cm": None,
+            "weight_kg": None,
+            "goal": None,
+            "other": {}
+        },
+
+        "pavel": {
+            "height_cm": None,
+            "weight_kg": None,
+            "goal": None,
+            "other": {}
+        },
+
+        "shared": {
+            "food_at_home": {},
+            "liked_dishes": [],
+            "disliked_dishes": [],
+            "dish_ratings": [],
+            "current_menu": None,
+            "menu_history": []
+        }
     }
 
+
+# ============================================================
+# SUPABASE — ЗАГРУЗКА
+# ============================================================
 
 def load_user_memory(user_id, first_name):
     try:
@@ -264,20 +309,78 @@ def load_user_memory(user_id, first_name):
             data = result.data[0].get("memory")
 
             if isinstance(data, dict):
+                # На случай старой структуры памяти
+                data = migrate_memory(data)
                 return data
 
     except Exception as e:
         print("SUPABASE LOAD ERROR:", repr(e))
 
     data = empty_memory()
-    data["profile"]["name"] = first_name
+
+    data["marianna"]["other"]["user_name"] = first_name
 
     return data
 
 
+# ============================================================
+# МИГРАЦИЯ СТАРОЙ ПАМЯТИ
+# ============================================================
+
+def migrate_memory(old_memory):
+    """
+    Если в Supabase уже лежит память старого формата,
+    переносим максимально полезные данные в новую структуру.
+    """
+
+    new_memory = empty_memory()
+
+    # Если это уже новая структура
+    if "marianna" in old_memory or "pavel" in old_memory:
+        for key in new_memory:
+            if key in old_memory and isinstance(old_memory[key], dict):
+                new_memory[key].update(old_memory[key])
+
+        return new_memory
+
+    # Старая структура profile
+    profile = old_memory.get("profile", {})
+
+    if "height_cm" in profile:
+        new_memory["marianna"]["height_cm"] = profile["height_cm"]
+
+    if "weight_kg" in profile:
+        new_memory["marianna"]["weight_kg"] = profile["weight_kg"]
+
+    # Старые списки
+    if "food_at_home" in old_memory:
+        new_memory["shared"]["food_at_home"] = old_memory["food_at_home"]
+
+    if "liked_dishes" in old_memory:
+        new_memory["shared"]["liked_dishes"] = old_memory["liked_dishes"]
+
+    if "disliked_dishes" in old_memory:
+        new_memory["shared"]["disliked_dishes"] = old_memory["disliked_dishes"]
+
+    if "dish_ratings" in old_memory:
+        new_memory["shared"]["dish_ratings"] = old_memory["dish_ratings"]
+
+    if "current_menu" in old_memory:
+        new_memory["shared"]["current_menu"] = old_memory["current_menu"]
+
+    if "menu_history" in old_memory:
+        new_memory["shared"]["menu_history"] = old_memory["menu_history"]
+
+    return new_memory
+
+
+# ============================================================
+# SUPABASE — СОХРАНЕНИЕ
+# ============================================================
+
 def save_user_memory(user_id, memory_data):
     try:
-        result = (
+        existing = (
             supabase
             .table("bot_memory")
             .select("id")
@@ -286,7 +389,7 @@ def save_user_memory(user_id, memory_data):
             .execute()
         )
 
-        if result.data:
+        if existing.data:
             (
                 supabase
                 .table("bot_memory")
@@ -296,6 +399,7 @@ def save_user_memory(user_id, memory_data):
                 .eq("user_id", user_id)
                 .execute()
             )
+
         else:
             (
                 supabase
@@ -314,84 +418,218 @@ def save_user_memory(user_id, memory_data):
 
 
 # ============================================================
-# АВТОМАТИЧЕСКОЕ СОХРАНЕНИЕ ПРОСТЫХ ДАННЫХ
+# OPENAI — ОПРЕДЕЛЕНИЕ НОВОЙ ПАМЯТИ
 # ============================================================
 
-def extract_memory_updates(text):
-    text_lower = text.lower()
-    updates = {}
+def extract_memory(user_message, current_memory):
 
-    # Рост
-    height = re.search(
-        r"(?:рост|ростом)\s*(?:у меня\s*)?(\d{2,3})\s*(?:см|сантиметров)?",
-        text_lower
+    compact_memory = json.dumps(
+        current_memory,
+        ensure_ascii=False,
+        separators=(",", ":")
     )
 
-    if height:
-        updates["height_cm"] = int(height.group(1))
+    prompt = f"""
+Ты управляешь постоянной памятью пользователя.
 
-    # Вес
-    weight = re.search(
-        r"(?:вес|вешу|весом)\s*(?:у меня\s*)?(\d{2,3}(?:[.,]\d+)?)\s*(?:кг|килограмм)?",
-        text_lower
-    )
+Текущая память:
 
-    if weight:
-        updates["weight_kg"] = float(
-            weight.group(1).replace(",", ".")
+{compact_memory}
+
+Новое сообщение пользователя:
+
+{user_message}
+
+Определи, сообщает ли пользователь новую постоянную информацию,
+которую нужно сохранить.
+
+Особенно обращай внимание на:
+- рост;
+- вес;
+- цели;
+- предпочтения;
+- нелюбимые продукты;
+- любимые блюда;
+- продукты дома;
+- оценки блюд;
+- изменения уже сохранённых данных.
+
+ВАЖНО:
+
+Если пользователь говорит «вес Павла 68 кг»,
+это относится к pavel.weight_kg.
+
+Если пользователь говорит «мой вес 84 кг»,
+необходимо определить владельца данных из контекста.
+
+Если пользователь говорит «вес Павла теперь 70 кг»,
+замени старое значение.
+
+Верни ТОЛЬКО JSON.
+
+Формат:
+
+{{
+  "has_update": true,
+  "updates": [
+    {{
+      "person": "pavel",
+      "field": "weight_kg",
+      "value": 68
+    }}
+  ]
+}}
+
+Если сохранять нечего:
+
+{{
+  "has_update": false,
+  "updates": []
+}}
+
+Допустимые person:
+- marianna
+- pavel
+- shared
+
+Не придумывай информацию.
+"""
+
+    try:
+        response = client.responses.create(
+            model="gpt-5-mini",
+            instructions="""
+Ты — модуль извлечения постоянной памяти.
+Возвращай только валидный JSON без Markdown.
+Не придумывай данные.
+""",
+            input=prompt,
         )
 
-    return updates
+        text = response.output_text.strip()
+
+        # Убираем возможные ```json
+        text = text.replace("```json", "").replace("```", "").strip()
+
+        data = json.loads(text)
+
+        if not isinstance(data, dict):
+            return []
+
+        if not data.get("has_update"):
+            return []
+
+        updates = data.get("updates", [])
+
+        if not isinstance(updates, list):
+            return []
+
+        return updates
+
+    except Exception as e:
+        print("MEMORY EXTRACTION ERROR:", repr(e))
+        return []
 
 
 # ============================================================
-# РАСПОЗНАВАНИЕ ОЦЕНОК
+# ПРИМЕНЕНИЕ ИЗМЕНЕНИЙ ПАМЯТИ
 # ============================================================
 
-def extract_rating(text):
-    text_lower = text.lower()
+def apply_memory_updates(memory_data, updates):
 
-    rating = None
+    for update in updates:
 
-    if "🚫" in text or "больше никогда" in text_lower or "больше не готовить" in text_lower:
-        rating = "🚫"
-    elif "❤️" in text or "очень понрав" in text_lower:
-        rating = "❤️"
-    elif "🙂" in text or "нормально" in text_lower:
-        rating = "🙂"
-    elif "😐" in text or "не понрав" in text_lower:
-        rating = "😐"
+        if not isinstance(update, dict):
+            continue
 
-    return rating
+        person = update.get("person")
+        field = update.get("field")
+        value = update.get("value")
+
+        if person not in ["marianna", "pavel", "shared"]:
+            continue
+
+        if not field:
+            continue
+
+        # marianna / pavel
+        if person in ["marianna", "pavel"]:
+
+            if field in [
+                "height_cm",
+                "weight_kg",
+                "goal"
+            ]:
+                memory_data[person][field] = value
+
+            else:
+                memory_data[person]["other"][field] = value
+
+        # shared
+        else:
+
+            if field == "food_at_home":
+
+                if isinstance(value, dict):
+                    memory_data["shared"]["food_at_home"].update(value)
+
+            elif field == "liked_dishes":
+
+                if isinstance(value, list):
+                    for item in value:
+                        if item not in memory_data["shared"]["liked_dishes"]:
+                            memory_data["shared"]["liked_dishes"].append(item)
+
+            elif field == "disliked_dishes":
+
+                if isinstance(value, list):
+                    for item in value:
+                        if item not in memory_data["shared"]["disliked_dishes"]:
+                            memory_data["shared"]["disliked_dishes"].append(item)
+
+            elif field == "dish_rating":
+
+                memory_data["shared"]["dish_ratings"].append(value)
+
+            elif field == "current_menu":
+
+                memory_data["shared"]["current_menu"] = value
+
+            elif field == "menu_history":
+
+                if isinstance(value, list):
+                    memory_data["shared"]["menu_history"].extend(value)
+
+    return memory_data
 
 
 # ============================================================
-# ДЛИННЫЕ СООБЩЕНИЯ
+# ДЛИННЫЕ СООБЩЕНИЯ TELEGRAM
 # ============================================================
 
 async def send_long_message(message, text):
+
     max_length = 3900
 
     if len(text) <= max_length:
         await message.reply_text(text)
         return
 
-    chunks = []
-
     while len(text) > max_length:
+
         cut = text.rfind("\n", 0, max_length)
 
         if cut < 1000:
             cut = max_length
 
-        chunks.append(text[:cut])
+        part = text[:cut]
+
+        await message.reply_text(part)
+
         text = text[cut:].lstrip()
 
     if text:
-        chunks.append(text)
-
-    for chunk in chunks:
-        await message.reply_text(chunk)
+        await message.reply_text(text)
 
 
 # ============================================================
@@ -399,11 +637,12 @@ async def send_long_message(message, text):
 # ============================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     await update.message.reply_text(
         "Привет! 🍽️\n\n"
         "Я помощник Марианны и Павла по меню.\n\n"
-        "Я могу запоминать ваши данные, "
-        "продукты дома, предпочтения и оценки блюд.\n\n"
+        "Я запоминаю ваши данные, продукты дома, "
+        "предпочтения и оценки блюд.\n\n"
         "Напиши мне что-нибудь!"
     )
 
@@ -413,6 +652,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if not update.message or not update.message.text:
         return
 
@@ -421,98 +661,80 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     print("MESSAGE:", user_message)
 
-    user_memory = load_user_memory(
+    # Загружаем память
+    memory_data = load_user_memory(
         user_id,
         update.effective_user.first_name
     )
 
-    # -----------------------------------------
-    # Простые данные: рост / вес
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # 1. Сначала определяем новую постоянную информацию
+    # --------------------------------------------------------
 
-    updates = extract_memory_updates(user_message)
+    updates = extract_memory(
+        user_message,
+        memory_data
+    )
 
     if updates:
-        if "profile" not in user_memory:
-            user_memory["profile"] = {}
 
-        user_memory["profile"].update(updates)
+        print("MEMORY UPDATES:", updates)
+
+        memory_data = apply_memory_updates(
+            memory_data,
+            updates
+        )
 
         save_user_memory(
             user_id,
-            user_memory
+            memory_data
         )
 
-        print("PROFILE UPDATED:", updates)
-
-    # -----------------------------------------
-    # Оценки блюд
-    # -----------------------------------------
-
-    rating = extract_rating(user_message)
-
-    if rating:
-        if "dish_ratings" not in user_memory:
-            user_memory["dish_ratings"] = []
-
-        user_memory["dish_ratings"].append({
-            "rating": rating,
-            "comment": user_message
-        })
-
-        # 🚫 одновременно добавляем в список
-        # нежелательных блюд
-        if rating == "🚫":
-            if "disliked_dishes" not in user_memory:
-                user_memory["disliked_dishes"] = []
-
-            user_memory["disliked_dishes"].append(
-                user_message
-            )
-
-        save_user_memory(
-            user_id,
-            user_memory
-        )
-
-    # -----------------------------------------
-    # Компактная память для OpenAI
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # 2. Компактная память для основного GPT
+    # --------------------------------------------------------
 
     memory_context = json.dumps(
-        user_memory,
+        memory_data,
         ensure_ascii=False,
         separators=(",", ":")
     )
 
-    # Защита от бесконечного роста памяти
-    if len(memory_context) > 12000:
-        memory_context = memory_context[:12000]
+    # Защита от чрезмерно большой истории
+    if len(memory_context) > 15000:
+        memory_context = memory_context[:15000]
 
     prompt = f"""
-Сохранённая память пользователя:
+ПОСТОЯННАЯ ПАМЯТЬ:
 
 {memory_context}
 
-Новое сообщение пользователя:
+СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ:
 
 {user_message}
 
-Используй сохранённую память.
+Используй память как источник фактов.
 
-Не спрашивай повторно информацию, которая уже есть в памяти.
+ВАЖНО:
+- не спрашивай повторно то, что уже известно;
+- данные Марианны и Павла не смешивай;
+- если пользователь спрашивает конкретное сохранённое значение,
+  ответь непосредственно;
+- если пользователь просит новое меню — сразу составляй его;
+- учитывай продукты дома;
+- учитывай оценки и историю блюд;
+- не придумывай отсутствующие данные.
 
-Если пользователь сообщает новую постоянную информацию, учитывай её.
-
-Если пользователь просит новое меню — сразу создавай меню,
-используя сохранённые данные.
+Если информации действительно не хватает для выполнения задачи,
+тогда задай только необходимый вопрос.
 """
 
-    # -----------------------------------------
-    # OpenAI
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # 3. Основной OpenAI
+    # --------------------------------------------------------
 
     try:
+
         response = client.responses.create(
             model="gpt-5-mini",
             instructions=SYSTEM_PROMPT,
@@ -524,6 +746,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("OPENAI OK")
 
     except Exception as e:
+
         print("OPENAI ERROR:", repr(e))
 
         await update.message.reply_text(
@@ -532,11 +755,12 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # -----------------------------------------
-    # Telegram
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # 4. Отправляем ответ
+    # --------------------------------------------------------
 
     try:
+
         await send_long_message(
             update.message,
             answer
@@ -545,6 +769,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("TELEGRAM RESPONSE SENT")
 
     except Exception as e:
+
         print("TELEGRAM ERROR:", repr(e))
 
 
@@ -561,10 +786,11 @@ def home():
 
 
 # ============================================================
-# TELEGRAM
+# TELEGRAM BOT
 # ============================================================
 
 async def run_bot():
+
     application = (
         Application.builder()
         .token(TELEGRAM_TOKEN)
@@ -596,6 +822,7 @@ async def run_bot():
 # ============================================================
 
 async def main():
+
     asyncio.create_task(run_bot())
 
     from hypercorn.asyncio import serve
@@ -612,3 +839,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+````
