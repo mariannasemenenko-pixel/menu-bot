@@ -941,6 +941,90 @@ ABOUT_TEXT = """<b>Главное:</b> из-за большого объема �
 # SUPABASE — ЗАГРУЗКА / СОХРАНЕНИЕ
 # ============================================================
 
+def memory_richness_score(memory_data):
+    """
+    Грубая оценка того, сколько реальных данных в блоке памяти —
+    нужна, чтобы при миграции старых личных записей в общую выбрать
+    ту, где накоплено больше информации.
+    """
+    if not isinstance(memory_data, dict):
+        return 0
+
+    score = 0
+
+    for person_key in ("marianna", "pavel"):
+        person = memory_data.get(person_key, {})
+        if not isinstance(person, dict):
+            continue
+        if person.get("height_cm"):
+            score += 1
+        if person.get("weight_kg"):
+            score += 1
+        if person.get("goal"):
+            score += 1
+        score += len(person.get("other", {}) or {})
+
+    shared = memory_data.get("shared", {})
+    if isinstance(shared, dict):
+        if shared.get("current_menu"):
+            score += 5
+        score += len(shared.get("food_at_home", {}) or {})
+        score += len(shared.get("liked_dishes", []) or [])
+        score += len(shared.get("disliked_dishes", []) or [])
+        score += len(shared.get("dish_ratings", []) or [])
+        score += len(shared.get("menu_history", []) or [])
+
+    return score
+
+
+def fetch_raw_memory_by_id_sync(raw_user_id):
+    """Достаёт сырую память (без миграции формата) по конкретному id, если она есть."""
+    try:
+        result = (
+            supabase.table("bot_memory")
+            .select("memory")
+            .eq("user_id", raw_user_id)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            data = result.data[0].get("memory")
+            if isinstance(data, dict):
+                return data
+    except Exception as e:
+        log("SUPABASE LOAD ERROR (legacy check):", repr(e))
+
+    return None
+
+
+def migrate_legacy_personal_memory_sync():
+    """
+    Одноразовая миграция: если общей записи SHARED_MEMORY_KEY ещё нет,
+    ищем старые личные записи (по Telegram ID каждого из ALLOWED_USER_IDS,
+    сохранённые до перехода на общую память) и берём за основу ту,
+    где реально больше накопленных данных. Если обе пустые — просто
+    начинаем с чистой памяти.
+    """
+    candidates = []
+
+    for legacy_id in ALLOWED_USER_IDS:
+        raw = fetch_raw_memory_by_id_sync(legacy_id)
+        if raw:
+            migrated = migrate_memory(raw)
+            candidates.append(migrated)
+
+    if not candidates:
+        return None
+
+    best = max(candidates, key=memory_richness_score)
+
+    if memory_richness_score(best) == 0:
+        return None
+
+    log("MIGRATED LEGACY PERSONAL MEMORY INTO SHARED KEY")
+    return best
+
+
 def load_user_memory_sync(user_id, first_name):
     try:
         result = (
@@ -955,6 +1039,15 @@ def load_user_memory_sync(user_id, first_name):
             data = result.data[0].get("memory")
             if isinstance(data, dict):
                 return migrate_memory(data)
+
+        # Записи под этим user_id ещё нет. Если это общий ключ друзей —
+        # пробуем один раз подтянуть данные из старых личных записей,
+        # чтобы не начинать всё с нуля.
+        if user_id == SHARED_MEMORY_KEY:
+            migrated = migrate_legacy_personal_memory_sync()
+            if migrated is not None:
+                save_user_memory_sync(user_id, migrated)
+                return migrated
 
     except Exception as e:
         log("SUPABASE LOAD ERROR:", repr(e))
