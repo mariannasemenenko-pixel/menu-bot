@@ -32,14 +32,16 @@ OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-client = AsyncOpenAI(
-    api_key=OPENAI_API_KEY
-)
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-supabase = create_client(
-    SUPABASE_URL,
-    SUPABASE_KEY
-)
+# Безопасный потолок на размер памяти, которую мы кладём в промпт.
+# После перехода на компактную историю меню (только названия блюд,
+# а не весь HTML) реальный размер должен быть в разы меньше этого лимита.
+MEMORY_CHAR_LIMIT = 12000
+
+# Сколько последних меню храним в компактной истории (только названия блюд)
+MENU_HISTORY_LIMIT = 7
 
 
 # ============================================================
@@ -93,10 +95,10 @@ SYSTEM_PROMPT = """
 Завтрак Павла должен быть обычным, средним по размеру.
 
 ============================================================
-ЦИКЛ МЕНЮ
+МЕНЮ НА 3 ДНЯ
 ============================================================
 
-Один цикл длится 3 дня.
+Одно меню действует 3 дня.
 
 Во все три дня одинаковыми остаются:
 - завтрак Павла;
@@ -175,7 +177,7 @@ SYSTEM_PROMPT = """
 ПОКУПКИ
 ============================================================
 
-Список продуктов на весь 3-дневный цикл.
+Список продуктов на весь 3-дневный период.
 
 Учитывай:
 - двух человек;
@@ -203,7 +205,7 @@ SYSTEM_PROMPT = """
 Это очень важно.
 
 Если пользователь просит заменить ОДНО блюдо в текущем меню,
-НЕ создавай полностью новый цикл с другими блюдами.
+НЕ создавай полностью новое меню с другими блюдами.
 
 Нужно:
 1. взять текущее меню из памяти;
@@ -211,7 +213,7 @@ SYSTEM_PROMPT = """
 3. заменить только этот элемент;
 4. сохранить все остальные блюда без изменений;
 5. пересчитать порции, КБЖУ и список покупок;
-6. сохранить обновлённое меню как текущий цикл.
+6. сохранить обновлённое меню как текущее.
 
 Например:
 
@@ -234,7 +236,7 @@ SYSTEM_PROMPT = """
 
 «Замени завтрак на сырники»
 → новый завтрак должен быть сырниками,
-остальные элементы цикла сохранить.
+остальные элементы меню сохранить.
 
 Если пользователь говорит:
 «Мне надоел этот завтрак, давай другой»
@@ -275,7 +277,7 @@ SYSTEM_PROMPT = """
 - «Давай новое меню»
 - или аналогичную команду
 
-создай полный новый 3-дневный цикл.
+создай полное новое меню на 3 дня.
 
 Учитывай:
 - память;
@@ -299,7 +301,7 @@ SYSTEM_PROMPT = """
 показывай текущее сохранённое меню.
 
 Если текущего меню нет,
-скажи, что текущего цикла пока нет, и предложи создать новое.
+скажи, что текущего меню пока нет, и предложи создать новое.
 
 ============================================================
 ПАМЯТЬ
@@ -340,7 +342,6 @@ SYSTEM_PROMPT = """
 2. 🛒 ПОКУПКИ НА 3 ДНЯ
 3. 👨‍🍳 ПРИГОТОВЛЕНИЕ
 4. ⚖️ ПОРЦИИ И КБЖУ
-5. 📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1
 
 Ответ всегда в HTML для Telegram (parse_mode HTML).
 Разрешены только теги: <b>, <i>, <u>, <s>, <code>, <pre>, <a>, <blockquote expandable>.
@@ -363,6 +364,14 @@ SYSTEM_PROMPT = """
 - дополнительные пояснения.
 
 Только названия блюд.
+
+В этом разделе должно быть РОВНО пять пунктов — ни больше, ни меньше:
+завтрак Павла, основное блюдо, гарнир, закуска Марианны, овощи Павла.
+
+КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО добавлять любые дополнительные блюда,
+перекусы, десерты или другие пункты сверх этих пяти.
+Не придумывай отдельный «перекус» — единственный перекус/закуска
+во всём меню — это закуска Марианны, указанная ниже.
 
 Используй формат:
 
@@ -445,7 +454,7 @@ SYSTEM_PROMPT = """
 
 Даже если блюдо очень простое.
 
-Это необходимо для того, чтобы было понятно, сколько именно приготовить на весь цикл.
+Это необходимо для того, чтобы было понятно, сколько именно приготовить на весь период.
 
 Каждое блюдо — отдельный блок: заголовок снаружи, детали внутри <blockquote expandable>.
 
@@ -520,7 +529,8 @@ SYSTEM_PROMPT = """
 - разогрев в дни 2–3;
 - хранение в контейнерах;
 - «разложить по порциям / контейнерам»;
-- отдельный блок «Хранение и разогрев».
+- отдельный блок «Хранение и разогрев»;
+- отдельный список того, что приготовить в День 1 — такого раздела в ответе быть не должно.
 
 Только приготовление: ингредиенты и шаги готовки.
 
@@ -588,36 +598,6 @@ SYSTEM_PROMPT = """
 Для Марианны всегда используй эмодзи 🧑 (не 👩).
 
 ============================================================
-5. 📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1
-============================================================
-
-В конце каждого полного меню обязательно добавляй:
-
-<b>📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1</b>
-
-Коротко перечисли ВСЁ, что необходимо приготовить или подготовить заранее на все 3 дня.
-
-Например:
-
-<b>📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1</b>
-
-• Курица — 900 г готового блюда
-• Картофель — 750 г готового
-• Брокколи — 450 г
-• Сырники — 3 порции
-• Закуска Марианны — 3 порции
-
-НЕ пиши фразы про разогрев, контейнеры и «разложить по порциям».
-Только список того, что приготовить/подготовить в День 1.
-
-Если какой-либо элемент не требует приготовления, всё равно укажи его.
-
-Например:
-
-• Хлебцы — 3 порции
-• Творожный сыр — 3 порции
-
-============================================================
 ОБЩИЕ ПРАВИЛА ФОРМАТА
 ============================================================
 
@@ -630,8 +610,6 @@ SYSTEM_PROMPT = """
 👨‍🍳 ПРИГОТОВЛЕНИЕ
 
 ⚖️ ПОРЦИИ И КБЖУ
-
-📦 ЧТО ПРИГОТОВИТЬ В ДЕНЬ 1
 
 Не меняй порядок разделов.
 
@@ -679,20 +657,20 @@ def empty_memory():
             "goal": None,
             "other": {}
         },
-
         "pavel": {
             "height_cm": None,
             "weight_kg": None,
             "goal": None,
             "other": {}
         },
-
         "shared": {
             "food_at_home": {},
             "liked_dishes": [],
             "disliked_dishes": [],
             "dish_ratings": [],
             "current_menu": None,
+            # Компактная история: список коротких словарей с названиями
+            # блюд прошлых меню (НЕ полный текст), чтобы не раздувать память.
             "menu_history": []
         }
     }
@@ -702,17 +680,8 @@ def empty_memory():
 # OPENAI — ОБЩАЯ ФУНКЦИЯ
 # ============================================================
 
-async def ask_openai(
-    instructions,
-    input_text,
-    timeout=120
-):
-    """
-    Асинхронный запрос к OpenAI с таймаутом.
-    """
-
+async def ask_openai(instructions, input_text, timeout=90):
     try:
-
         response = await asyncio.wait_for(
             client.responses.create(
                 model="gpt-5-mini",
@@ -731,20 +700,11 @@ async def ask_openai(
         return text
 
     except asyncio.TimeoutError:
-
-        print(
-            f"OPENAI TIMEOUT AFTER {timeout} SECONDS"
-        )
-
+        print(f"OPENAI TIMEOUT AFTER {timeout} SECONDS")
         return None
 
     except Exception as e:
-
-        print(
-            "OPENAI ERROR:",
-            repr(e)
-        )
-
+        print("OPENAI ERROR:", repr(e))
         return None
 
 
@@ -754,145 +714,57 @@ async def ask_openai(
 
 def main_keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "🆕  Новый цикл на 3 дня",
-                callback_data="new_cycle"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🔄  Заменить блюдо",
-                callback_data="replace_menu"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🛒  Продукты",
-                callback_data="products"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "❤️  Предпочтения",
-                callback_data="preferences"
-            )
-        ],
+        [InlineKeyboardButton("🆕  Новое меню на 3 дня", callback_data="new_menu")],
+        [InlineKeyboardButton("🔄  Заменить блюдо", callback_data="replace_menu")],
+        [InlineKeyboardButton("🛒  Продукты", callback_data="products")],
+        [InlineKeyboardButton("❤️  Предпочтения", callback_data="preferences")],
     ])
 
 
 def replace_keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "🍳  Завтрак",
-                callback_data="replace_breakfast"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🍗  Основное",
-                callback_data="replace_main"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🥨  Закуска",
-                callback_data="replace_snack"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "🥦  Овощи",
-                callback_data="replace_vegetables"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "↩️  Назад",
-                callback_data="main_menu"
-            )
-        ],
+        [InlineKeyboardButton("🍳  Завтрак", callback_data="replace_breakfast")],
+        [InlineKeyboardButton("🍗  Основное", callback_data="replace_main")],
+        [InlineKeyboardButton("🥨  Закуска", callback_data="replace_snack")],
+        [InlineKeyboardButton("🥦  Овощи", callback_data="replace_vegetables")],
+        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")],
     ])
 
 
 def products_keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "🏠  Что есть дома",
-                callback_data="food_home"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "✏️  Изменить продукты",
-                callback_data="edit_food"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "↩️  Назад",
-                callback_data="main_menu"
-            )
-        ],
+        [InlineKeyboardButton("🏠  Что есть дома", callback_data="food_home")],
+        [InlineKeyboardButton("✏️  Изменить продукты", callback_data="edit_food")],
+        [InlineKeyboardButton("🧹  Очистить продукты дома", callback_data="clear_food_home")],
+        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")],
     ])
 
 
 def preferences_keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "🧑  Марианна",
-                callback_data="pref_marianna"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "👨  Павел",
-                callback_data="pref_pavel"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "⭐  Оценить блюдо",
-                callback_data="rate_dish"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "↩️  Назад",
-                callback_data="main_menu"
-            )
-        ],
+        [InlineKeyboardButton("🧑  Марианна: изменить", callback_data="pref_marianna")],
+        [InlineKeyboardButton("👨  Павел: изменить", callback_data="pref_pavel")],
+        [InlineKeyboardButton("ℹ️  Информация о Марианне", callback_data="info_marianna")],
+        [InlineKeyboardButton("ℹ️  Информация о Павле", callback_data="info_pavel")],
+        [InlineKeyboardButton("⭐  Оценить блюдо", callback_data="rate_dish")],
+        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")],
     ])
 
 
 def back_keyboard():
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "↩️  Назад",
-                callback_data="main_menu"
-            )
-        ]
+        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")]
     ])
 
 
 # ============================================================
-# SUPABASE — ЗАГРУЗКА
+# SUPABASE — ЗАГРУЗКА / СОХРАНЕНИЕ
 # ============================================================
 
-def load_user_memory_sync(
-    user_id,
-    first_name
-):
-
+def load_user_memory_sync(user_id, first_name):
     try:
-
         result = (
-            supabase
-            .table("bot_memory")
+            supabase.table("bot_memory")
             .select("memory")
             .eq("user_id", user_id)
             .limit(1)
@@ -900,175 +772,26 @@ def load_user_memory_sync(
         )
 
         if result.data:
-
             data = result.data[0].get("memory")
-
             if isinstance(data, dict):
-
-                return migrate_memory(
-                    data
-                )
+                return migrate_memory(data)
 
     except Exception as e:
-
-        print(
-            "SUPABASE LOAD ERROR:",
-            repr(e)
-        )
+        print("SUPABASE LOAD ERROR:", repr(e))
 
     data = empty_memory()
-
-    data["marianna"]["other"]["user_name"] = (
-        first_name
-    )
-
+    data["marianna"]["other"]["user_name"] = first_name
     return data
 
 
-async def load_user_memory(
-    user_id,
-    first_name
-):
-
-    return await asyncio.to_thread(
-        load_user_memory_sync,
-        user_id,
-        first_name
-    )
+async def load_user_memory(user_id, first_name):
+    return await asyncio.to_thread(load_user_memory_sync, user_id, first_name)
 
 
-# ============================================================
-# МИГРАЦИЯ
-# ============================================================
-
-def migrate_memory(old_memory):
-
-    new_memory = empty_memory()
-
-    if (
-        "marianna" in old_memory
-        or "pavel" in old_memory
-    ):
-
-        for key in new_memory:
-
-            if (
-                key in old_memory
-                and isinstance(
-                    old_memory[key],
-                    dict
-                )
-            ):
-
-                new_memory[key].update(
-                    old_memory[key]
-                )
-
-        return new_memory
-
-    profile = old_memory.get(
-        "profile",
-        {}
-    )
-
-    if "height_cm" in profile:
-        new_memory[
-            "marianna"
-        ][
-            "height_cm"
-        ] = profile["height_cm"]
-
-    if "weight_kg" in profile:
-        new_memory[
-            "marianna"
-        ][
-            "weight_kg"
-        ] = profile["weight_kg"]
-
-    if "goal" in profile:
-        new_memory[
-            "marianna"
-        ][
-            "goal"
-        ] = profile["goal"]
-
-    if "food_at_home" in old_memory:
-
-        new_memory[
-            "shared"
-        ][
-            "food_at_home"
-        ] = old_memory[
-            "food_at_home"
-        ]
-
-    if "liked_dishes" in old_memory:
-
-        new_memory[
-            "shared"
-        ][
-            "liked_dishes"
-        ] = old_memory[
-            "liked_dishes"
-        ]
-
-    if "disliked_dishes" in old_memory:
-
-        new_memory[
-            "shared"
-        ][
-            "disliked_dishes"
-        ] = old_memory[
-            "disliked_dishes"
-        ]
-
-    if "dish_ratings" in old_memory:
-
-        new_memory[
-            "shared"
-        ][
-            "dish_ratings"
-        ] = old_memory[
-            "dish_ratings"
-        ]
-
-    if "current_menu" in old_memory:
-
-        new_memory[
-            "shared"
-        ][
-            "current_menu"
-        ] = old_memory[
-            "current_menu"
-        ]
-
-    if "menu_history" in old_memory:
-
-        new_memory[
-            "shared"
-        ][
-            "menu_history"
-        ] = old_memory[
-            "menu_history"
-        ]
-
-    return new_memory
-
-
-# ============================================================
-# SUPABASE — СОХРАНЕНИЕ
-# ============================================================
-
-def save_user_memory_sync(
-    user_id,
-    memory_data
-):
-
+def save_user_memory_sync(user_id, memory_data):
     try:
-
         existing = (
-            supabase
-            .table("bot_memory")
+            supabase.table("bot_memory")
             .select("id")
             .eq("user_id", user_id)
             .limit(1)
@@ -1076,248 +799,145 @@ def save_user_memory_sync(
         )
 
         if existing.data:
-
-            (
-                supabase
-                .table("bot_memory")
-                .update({
-                    "memory": memory_data
-                })
-                .eq(
-                    "user_id",
-                    user_id
-                )
-                .execute()
-            )
-
+            supabase.table("bot_memory").update(
+                {"memory": memory_data}
+            ).eq("user_id", user_id).execute()
         else:
+            supabase.table("bot_memory").insert(
+                {"user_id": user_id, "memory": memory_data}
+            ).execute()
 
-            (
-                supabase
-                .table("bot_memory")
-                .insert({
-                    "user_id": user_id,
-                    "memory": memory_data
-                })
-                .execute()
-            )
-
-        print(
-            "MEMORY SAVED"
-        )
+        print("MEMORY SAVED")
 
     except Exception as e:
-
-        print(
-            "SUPABASE SAVE ERROR:",
-            repr(e)
-        )
+        print("SUPABASE SAVE ERROR:", repr(e))
 
 
-async def save_user_memory(
-    user_id,
-    memory_data
-):
-
-    await asyncio.to_thread(
-        save_user_memory_sync,
-        user_id,
-        memory_data
-    )
+async def save_user_memory(user_id, memory_data):
+    await asyncio.to_thread(save_user_memory_sync, user_id, memory_data)
 
 
 # ============================================================
-# НОРМАЛИЗАЦИЯ
+# МИГРАЦИЯ
+# ============================================================
+
+def migrate_memory(old_memory):
+    new_memory = empty_memory()
+
+    if "marianna" in old_memory or "pavel" in old_memory:
+        for key in new_memory:
+            if key in old_memory and isinstance(old_memory[key], dict):
+                new_memory[key].update(old_memory[key])
+
+        # Старые версии могли хранить menu_history как список полных
+        # HTML-меню — это раздувало память. Если так, обнуляем историю
+        # (сама она наберётся заново в компактном виде), но current_menu
+        # сохраняем как есть.
+        shared = new_memory.get("shared", {})
+        history = shared.get("menu_history", [])
+        if history and any(isinstance(item, str) for item in history):
+            shared["menu_history"] = []
+            new_memory["shared"] = shared
+
+        return new_memory
+
+    profile = old_memory.get("profile", {})
+
+    if "height_cm" in profile:
+        new_memory["marianna"]["height_cm"] = profile["height_cm"]
+    if "weight_kg" in profile:
+        new_memory["marianna"]["weight_kg"] = profile["weight_kg"]
+    if "goal" in profile:
+        new_memory["marianna"]["goal"] = profile["goal"]
+
+    if "food_at_home" in old_memory:
+        new_memory["shared"]["food_at_home"] = old_memory["food_at_home"]
+    if "liked_dishes" in old_memory:
+        new_memory["shared"]["liked_dishes"] = old_memory["liked_dishes"]
+    if "disliked_dishes" in old_memory:
+        new_memory["shared"]["disliked_dishes"] = old_memory["disliked_dishes"]
+    if "dish_ratings" in old_memory:
+        new_memory["shared"]["dish_ratings"] = old_memory["dish_ratings"]
+    if "current_menu" in old_memory:
+        new_memory["shared"]["current_menu"] = old_memory["current_menu"]
+
+    # Старую полную menu_history не переносим (могла быть огромной) —
+    # она наберётся заново в компактном виде.
+
+    return new_memory
+
+
+# ============================================================
+# НОРМАЛИЗАЦИЯ / СОВПАДЕНИЕ ТЕКСТА
 # ============================================================
 
 def normalize_text(value):
-
     if value is None:
         return ""
-
     value = str(value).lower().strip()
-
-    value = value.replace(
-        "ё",
-        "е"
-    )
-
-    value = re.sub(
-        r"\s+",
-        " ",
-        value
-    )
-
+    value = value.replace("ё", "е")
+    value = re.sub(r"\s+", " ", value)
     return value
+
+
+def text_matches(target, query):
+    target = normalize_text(target)
+    query = normalize_text(query)
+
+    if not target or not query:
+        return False
+    if target == query:
+        return True
+    if query in target:
+        return True
+    if target in query:
+        return True
+    return False
 
 
 # ============================================================
 # ПРОВЕРКА — НУЖНО ЛИ ОБРАЩАТЬСЯ К ПАМЯТИ
 # ============================================================
 
-def should_check_memory(
-    user_message
-):
+MEMORY_WORDS = [
+    "запомни", "запиши", "сохрани",
+    "забудь", "удали", "удалить", "убери", "сотри", "очисти", "больше не храни",
+    "купили", "купила", "купил", "покупаем",
+    "есть дома", "дома есть", "осталось", "остался", "осталась", "остались",
+    "закончился", "закончилась", "закончились", "закончилось",
+    "понравилось", "понравился", "понравилась", "понравились",
+    "не понравилось", "не понравился", "не понравилась", "не понравились",
+    "люблю", "любит", "любим",
+    "не люблю", "не любит", "не любим",
+    "надоел", "надоела", "надоело", "надоели",
+    "больше не хочу", "больше не хочет", "больше не хотим",
+    "никогда не готовить", "больше никогда"
+]
 
-    text = normalize_text(
-        user_message
-    )
 
-    memory_words = [
-        "запомни",
-        "запиши",
-        "сохрани",
-
-        "забудь",
-        "удали",
-        "удалить",
-        "убери",
-        "сотри",
-        "очисти",
-        "больше не храни",
-
-        "купили",
-        "купила",
-        "купил",
-        "покупаем",
-
-        "есть дома",
-        "дома есть",
-        "осталось",
-        "остался",
-        "осталась",
-        "остались",
-
-        "закончился",
-        "закончилась",
-        "закончились",
-        "закончилось",
-
-        "понравилось",
-        "понравился",
-        "понравилась",
-        "понравились",
-
-        "не понравилось",
-        "не понравился",
-        "не понравилась",
-        "не понравились",
-
-        "люблю",
-        "любит",
-        "любим",
-
-        "не люблю",
-        "не любит",
-        "не любим",
-
-        "надоел",
-        "надоела",
-        "надоело",
-        "надоели",
-
-        "больше не хочу",
-        "больше не хочет",
-        "больше не хотим",
-
-        "никогда не готовить",
-        "больше никогда"
-    ]
-
-    return any(
-        word in text
-        for word in memory_words
-    )
+def should_check_memory(user_message):
+    text = normalize_text(user_message)
+    return any(word in text for word in MEMORY_WORDS)
 
 
 # ============================================================
-# СОВПАДЕНИЕ
+# УДАЛЕНИЕ БЛЮДА ИЗ СПИСКА / РЕКУРСИВНОЕ УДАЛЕНИЕ
 # ============================================================
 
-def text_matches(
-    target,
-    query
-):
-
-    target = normalize_text(
-        target
-    )
-
-    query = normalize_text(
-        query
-    )
-
-    if not target or not query:
-        return False
-
-    if target == query:
-        return True
-
-    if query in target:
-        return True
-
-    if target in query:
-        return True
-
-    return False
-
-
-# ============================================================
-# УДАЛЕНИЕ БЛЮДА ИЗ СПИСКА
-# ============================================================
-
-def remove_dish_from_list(
-    items,
-    dish
-):
-
-    if not isinstance(
-        items,
-        list
-    ):
-
+def remove_dish_from_list(items, dish):
+    if not isinstance(items, list):
         return items
 
     result = []
-
     for item in items:
-
         should_remove = False
 
-        if isinstance(
-            item,
-            str
-        ):
-
-            if text_matches(
-                item,
-                dish
-            ):
-
+        if isinstance(item, str):
+            if text_matches(item, dish):
                 should_remove = True
-
-        elif isinstance(
-            item,
-            dict
-        ):
-
-            for key in [
-                "dish",
-                "name",
-                "title",
-                "meal",
-                "recipe",
-                "value"
-            ]:
-
-                if (
-                    key in item
-                    and text_matches(
-                        item[key],
-                        dish
-                    )
-                ):
-
+        elif isinstance(item, dict):
+            for key in ["dish", "name", "title", "meal", "recipe", "value"]:
+                if key in item and text_matches(item[key], dish):
                     should_remove = True
                     break
 
@@ -1327,270 +947,79 @@ def remove_dish_from_list(
     return result
 
 
-# ============================================================
-# РЕКУРСИВНОЕ УДАЛЕНИЕ
-# ============================================================
-
-def remove_dish_recursive(
-    value,
-    dish
-):
-
-    if isinstance(
-        value,
-        list
-    ):
-
+def remove_dish_recursive(value, dish):
+    if isinstance(value, list):
         result = []
-
         for item in value:
-
-            if isinstance(
-                item,
-                str
-            ):
-
-                if text_matches(
-                    item,
-                    dish
-                ):
-
+            if isinstance(item, str):
+                if text_matches(item, dish):
                     continue
-
-            elif isinstance(
-                item,
-                dict
-            ):
-
+            elif isinstance(item, dict):
                 object_matches = False
-
-                for key in [
-                    "dish",
-                    "name",
-                    "title",
-                    "meal",
-                    "recipe"
-                ]:
-
-                    if (
-                        key in item
-                        and text_matches(
-                            item[key],
-                            dish
-                        )
-                    ):
-
+                for key in ["dish", "name", "title", "meal", "recipe"]:
+                    if key in item and text_matches(item[key], dish):
                         object_matches = True
                         break
-
                 if object_matches:
                     continue
-
-                item = remove_dish_recursive(
-                    item,
-                    dish
-                )
-
+                item = remove_dish_recursive(item, dish)
             else:
-
-                item = remove_dish_recursive(
-                    item,
-                    dish
-                )
+                item = remove_dish_recursive(item, dish)
 
             result.append(item)
-
         return result
 
-    if isinstance(
-        value,
-        dict
-    ):
-
+    if isinstance(value, dict):
         result = {}
-
         for key, item in value.items():
-
-            if text_matches(
-                key,
-                dish
-            ):
-
+            if text_matches(key, dish):
                 continue
-
-            result[key] = remove_dish_recursive(
-                item,
-                dish
-            )
-
+            result[key] = remove_dish_recursive(item, dish)
         return result
 
     return value
 
 
-# ============================================================
-# ПОЛНОЕ УДАЛЕНИЕ БЛЮДА
-# ============================================================
+def delete_all_about_dish(memory_data, dish):
+    shared = memory_data.get("shared", {})
 
-def delete_all_about_dish(
-    memory_data,
-    dish
-):
+    shared["liked_dishes"] = remove_dish_from_list(shared.get("liked_dishes", []), dish)
+    shared["disliked_dishes"] = remove_dish_from_list(shared.get("disliked_dishes", []), dish)
+    shared["dish_ratings"] = remove_dish_from_list(shared.get("dish_ratings", []), dish)
 
-    shared = memory_data.get(
-        "shared",
-        {}
-    )
+    if shared.get("current_menu") is not None:
+        shared["current_menu"] = remove_dish_recursive(shared["current_menu"], dish)
 
-    shared[
-        "liked_dishes"
-    ] = remove_dish_from_list(
-        shared.get(
-            "liked_dishes",
-            []
-        ),
-        dish
-    )
+    shared["menu_history"] = remove_dish_recursive(shared.get("menu_history", []), dish)
 
-    shared[
-        "disliked_dishes"
-    ] = remove_dish_from_list(
-        shared.get(
-            "disliked_dishes",
-            []
-        ),
-        dish
-    )
-
-    shared[
-        "dish_ratings"
-    ] = remove_dish_from_list(
-        shared.get(
-            "dish_ratings",
-            []
-        ),
-        dish
-    )
-
-    if shared.get(
-        "current_menu"
-    ) is not None:
-
-        shared[
-            "current_menu"
-        ] = remove_dish_recursive(
-            shared[
-                "current_menu"
-            ],
-            dish
-        )
-
-    shared[
-        "menu_history"
-    ] = remove_dish_recursive(
-        shared.get(
-            "menu_history",
-            []
-        ),
-        dish
-    )
-
-    for key in list(
-        shared.keys()
-    ):
-
-        if key in [
-            "liked_dishes",
-            "disliked_dishes",
-            "dish_ratings",
-            "current_menu",
-            "menu_history"
-        ]:
-
+    for key in list(shared.keys()):
+        if key in ["liked_dishes", "disliked_dishes", "dish_ratings", "current_menu", "menu_history"]:
             continue
+        shared[key] = remove_dish_recursive(shared[key], dish)
 
-        shared[key] = remove_dish_recursive(
-            shared[key],
-            dish
-        )
-
-    memory_data[
-        "shared"
-    ] = shared
-
+    memory_data["shared"] = shared
     return memory_data
 
 
-# ============================================================
-# ОЦЕНКА БЛЮДА
-# ============================================================
-
-def update_dish_rating(
-    memory_data,
-    dish,
-    person,
-    rating
-):
-
-    ratings = memory_data[
-        "shared"
-    ].get(
-        "dish_ratings",
-        []
-    )
-
+def update_dish_rating(memory_data, dish, person, rating):
+    ratings = memory_data["shared"].get("dish_ratings", [])
     new_ratings = []
 
     for item in ratings:
-
-        if not isinstance(
-            item,
-            dict
-        ):
-
-            new_ratings.append(
-                item
-            )
-
+        if not isinstance(item, dict):
+            new_ratings.append(item)
             continue
 
-        item_dish = (
-            item.get("dish")
-            or item.get("name")
-            or item.get("meal")
-            or ""
-        )
+        item_dish = item.get("dish") or item.get("name") or item.get("meal") or ""
+        item_person = item.get("person")
 
-        item_person = item.get(
-            "person"
-        )
-
-        if (
-            text_matches(
-                item_dish,
-                dish
-            )
-            and item_person == person
-        ):
-
+        if text_matches(item_dish, dish) and item_person == person:
             continue
 
-        new_ratings.append(
-            item
-        )
+        new_ratings.append(item)
 
-    new_ratings.append({
-        "dish": dish,
-        "person": person,
-        "rating": rating
-    })
-
-    memory_data[
-        "shared"
-    ][
-        "dish_ratings"
-    ] = new_ratings
-
+    new_ratings.append({"dish": dish, "person": person, "rating": rating})
+    memory_data["shared"]["dish_ratings"] = new_ratings
     return memory_data
 
 
@@ -1598,370 +1027,132 @@ def update_dish_rating(
 # ПРИМЕНЕНИЕ ОПЕРАЦИЙ ПАМЯТИ
 # ============================================================
 
-def apply_memory_updates(
-    memory_data,
-    operations
-):
-
+def apply_memory_updates(memory_data, operations):
     for operation in operations:
-
-        if not isinstance(
-            operation,
-            dict
-        ):
-
+        if not isinstance(operation, dict):
             continue
 
-        action = operation.get(
-            "action"
-        )
+        action = operation.get("action")
 
         # ====================================================
         # ADD / UPDATE
         # ====================================================
+        if action in ["add", "update"]:
+            person = operation.get("person")
+            field = operation.get("field")
+            value = operation.get("value")
 
-        if action in [
-            "add",
-            "update"
-        ]:
-
-            person = operation.get(
-                "person"
-            )
-
-            field = operation.get(
-                "field"
-            )
-
-            value = operation.get(
-                "value"
-            )
-
-            if person not in [
-                "marianna",
-                "pavel",
-                "shared"
-            ]:
-
+            if person not in ["marianna", "pavel", "shared"]:
                 continue
-
             if not field:
                 continue
 
-            if person in [
-                "marianna",
-                "pavel"
-            ]:
-
-                if field in [
-                    "height_cm",
-                    "weight_kg",
-                    "goal"
-                ]:
-
-                    memory_data[
-                        person
-                    ][field] = value
-
+            if person in ["marianna", "pavel"]:
+                if field in ["height_cm", "weight_kg", "goal"]:
+                    memory_data[person][field] = value
                 else:
-
-                    memory_data[
-                        person
-                    ][
-                        "other"
-                    ][field] = value
+                    memory_data[person]["other"][field] = value
 
             else:
-
                 if field == "food_at_home":
-
-                    if isinstance(
-                        value,
-                        dict
-                    ):
-
-                        memory_data[
-                            "shared"
-                        ][
-                            "food_at_home"
-                        ].update(
-                            value
-                        )
+                    if isinstance(value, dict):
+                        memory_data["shared"]["food_at_home"].update(value)
 
                 elif field == "liked_dishes":
-
-                    if isinstance(
-                        value,
-                        list
-                    ):
-
+                    if isinstance(value, list):
                         for item in value:
-
-                            if item not in memory_data[
-                                "shared"
-                            ][
-                                "liked_dishes"
-                            ]:
-
-                                memory_data[
-                                    "shared"
-                                ][
-                                    "liked_dishes"
-                                ].append(
-                                    item
-                                )
+                            if item not in memory_data["shared"]["liked_dishes"]:
+                                memory_data["shared"]["liked_dishes"].append(item)
 
                 elif field == "disliked_dishes":
-
-                    if isinstance(
-                        value,
-                        list
-                    ):
-
+                    if isinstance(value, list):
                         for item in value:
-
-                            if item not in memory_data[
-                                "shared"
-                            ][
-                                "disliked_dishes"
-                            ]:
-
-                                memory_data[
-                                    "shared"
-                                ][
-                                    "disliked_dishes"
-                                ].append(
-                                    item
-                                )
+                            if item not in memory_data["shared"]["disliked_dishes"]:
+                                memory_data["shared"]["disliked_dishes"].append(item)
 
                 elif field == "dish_rating":
-
-                    if isinstance(
-                        value,
-                        dict
-                    ):
-
-                        dish = value.get(
-                            "dish"
-                        )
-
-                        person_value = value.get(
-                            "person"
-                        )
-
-                        rating = value.get(
-                            "rating"
-                        )
-
-                        if (
-                            dish
-                            and person_value
-                            and rating
-                        ):
-
-                            memory_data = update_dish_rating(
-                                memory_data,
-                                dish,
-                                person_value,
-                                rating
-                            )
+                    if isinstance(value, dict):
+                        dish = value.get("dish")
+                        person_value = value.get("person")
+                        rating = value.get("rating")
+                        if dish and person_value and rating:
+                            memory_data = update_dish_rating(memory_data, dish, person_value, rating)
 
                 elif field == "current_menu":
-
-                    memory_data[
-                        "shared"
-                    ][
-                        "current_menu"
-                    ] = value
+                    memory_data["shared"]["current_menu"] = value
 
                 elif field == "menu_history":
-
-                    if isinstance(
-                        value,
-                        list
-                    ):
-
-                        memory_data[
-                            "shared"
-                        ][
-                            "menu_history"
-                        ].extend(
-                            value
-                        )
+                    # "add" — дополняем компактную историю.
+                    # "update" — полностью заменяем (в т.ч. очистка value=[]).
+                    if action == "update":
+                        if isinstance(value, list):
+                            memory_data["shared"]["menu_history"] = value[-MENU_HISTORY_LIMIT:]
+                    else:
+                        if isinstance(value, list):
+                            history = memory_data["shared"].get("menu_history", [])
+                            history.extend(value)
+                            memory_data["shared"]["menu_history"] = history[-MENU_HISTORY_LIMIT:]
 
         # ====================================================
         # DELETE
         # ====================================================
-
         elif action == "delete":
+            person = operation.get("person")
+            field = operation.get("field")
+            value = operation.get("value")
 
-            person = operation.get(
-                "person"
-            )
-
-            field = operation.get(
-                "field"
-            )
-
-            value = operation.get(
-                "value"
-            )
-
-            if person not in [
-                "marianna",
-                "pavel",
-                "shared"
-            ]:
-
+            if person not in ["marianna", "pavel", "shared"]:
                 continue
 
-            if person in [
-                "marianna",
-                "pavel"
-            ]:
-
-                if field in [
-                    "height_cm",
-                    "weight_kg",
-                    "goal"
-                ]:
-
-                    if (
-                        value is None
-                        or memory_data[
-                            person
-                        ].get(
-                            field
-                        ) == value
-                    ):
-
-                        memory_data[
-                            person
-                        ][field] = None
-
+            if person in ["marianna", "pavel"]:
+                if field in ["height_cm", "weight_kg", "goal"]:
+                    if value is None or memory_data[person].get(field) == value:
+                        memory_data[person][field] = None
                 else:
-
-                    memory_data[
-                        person
-                    ][
-                        "other"
-                    ].pop(
-                        field,
-                        None
-                    )
+                    memory_data[person]["other"].pop(field, None)
 
             else:
-
                 if field == "food_at_home":
-
-                    food = memory_data[
-                        "shared"
-                    ].get(
-                        "food_at_home",
-                        {}
-                    )
-
-                    if isinstance(
-                        food,
-                        dict
-                    ):
-
-                        keys_to_delete = []
-
-                        for key in food.keys():
-
-                            if (
-                                value
-                                and text_matches(
-                                    key,
-                                    value
-                                )
-                            ):
-
-                                keys_to_delete.append(
-                                    key
-                                )
-
+                    food = memory_data["shared"].get("food_at_home", {})
+                    if isinstance(food, dict):
+                        keys_to_delete = [
+                            key for key in food.keys()
+                            if value and text_matches(key, value)
+                        ]
                         for key in keys_to_delete:
-
                             del food[key]
 
                 elif field == "liked_dishes":
-
-                    memory_data[
-                        "shared"
-                    ][
-                        "liked_dishes"
-                    ] = remove_dish_from_list(
-                        memory_data[
-                            "shared"
-                        ].get(
-                            "liked_dishes",
-                            []
-                        ),
-                        value
+                    memory_data["shared"]["liked_dishes"] = remove_dish_from_list(
+                        memory_data["shared"].get("liked_dishes", []), value
                     )
 
                 elif field == "disliked_dishes":
-
-                    memory_data[
-                        "shared"
-                    ][
-                        "disliked_dishes"
-                    ] = remove_dish_from_list(
-                        memory_data[
-                            "shared"
-                        ].get(
-                            "disliked_dishes",
-                            []
-                        ),
-                        value
+                    memory_data["shared"]["disliked_dishes"] = remove_dish_from_list(
+                        memory_data["shared"].get("disliked_dishes", []), value
                     )
 
                 elif field == "dish_rating":
-
-                    memory_data[
-                        "shared"
-                    ][
-                        "dish_ratings"
-                    ] = remove_dish_from_list(
-                        memory_data[
-                            "shared"
-                        ].get(
-                            "dish_ratings",
-                            []
-                        ),
-                        value
+                    memory_data["shared"]["dish_ratings"] = remove_dish_from_list(
+                        memory_data["shared"].get("dish_ratings", []), value
                     )
+
+                elif field == "menu_history":
+                    memory_data["shared"]["menu_history"] = []
 
         # ====================================================
         # DELETE ALL DISH
         # ====================================================
-
         elif action == "delete_all_dish":
-
-            dish = operation.get(
-                "dish"
-            )
-
+            dish = operation.get("dish")
             if dish:
-
-                memory_data = delete_all_about_dish(
-                    memory_data,
-                    dish
-                )
+                memory_data = delete_all_about_dish(memory_data, dish)
 
         # ====================================================
         # CLEAR FOOD
         # ====================================================
-
         elif action == "clear_food":
-
-            memory_data[
-                "shared"
-            ][
-                "food_at_home"
-            ] = {}
+            memory_data["shared"]["food_at_home"] = {}
 
     return memory_data
 
@@ -1970,22 +1161,16 @@ def apply_memory_updates(
 # OPENAI — ПАМЯТЬ
 # ============================================================
 
-async def extract_memory_operations(
-    user_message,
-    current_memory
-):
+def serialize_memory(memory_data):
+    text = json.dumps(memory_data, ensure_ascii=False, separators=(",", ":"))
+    if len(text) > MEMORY_CHAR_LIMIT:
+        print("WARNING: MEMORY TOO LARGE:", len(text))
+        text = text[:MEMORY_CHAR_LIMIT]
+    return text
 
-    compact_memory = json.dumps(
-        current_memory,
-        ensure_ascii=False,
-        separators=(",", ":")
-    )
 
-    if len(compact_memory) > 30000:
-
-        compact_memory = compact_memory[
-            :30000
-        ]
+async def extract_memory_operations(user_message, current_memory):
+    compact_memory = serialize_memory(current_memory)
 
     prompt = f"""
 Ты — модуль управления постоянной памятью.
@@ -2018,26 +1203,7 @@ clear_food
 
 {{
   "operations": [
-    {{
-      "action": "update",
-      "person": "pavel",
-      "field": "weight_kg",
-      "value": 68
-    }}
-  ]
-}}
-
-Пользователь:
-Вес Павла теперь 70 кг.
-
-{{
-  "operations": [
-    {{
-      "action": "update",
-      "person": "pavel",
-      "field": "weight_kg",
-      "value": 70
-    }}
+    {{"action": "update", "person": "pavel", "field": "weight_kg", "value": 68}}
   ]
 }}
 
@@ -2046,14 +1212,7 @@ clear_food
 
 {{
   "operations": [
-    {{
-      "action": "add",
-      "person": "shared",
-      "field": "food_at_home",
-      "value": {{
-        "куриное филе": "2 кг"
-      }}
-    }}
+    {{"action": "add", "person": "shared", "field": "food_at_home", "value": {{"куриное филе": "2 кг"}}}}
   ]
 }}
 
@@ -2062,26 +1221,7 @@ clear_food
 
 {{
   "operations": [
-    {{
-      "action": "delete",
-      "person": "shared",
-      "field": "food_at_home",
-      "value": "куриное филе"
-    }}
-  ]
-}}
-
-Пользователь:
-Удали филе из продуктов.
-
-{{
-  "operations": [
-    {{
-      "action": "delete",
-      "person": "shared",
-      "field": "food_at_home",
-      "value": "филе"
-    }}
+    {{"action": "delete", "person": "shared", "field": "food_at_home", "value": "куриное филе"}}
   ]
 }}
 
@@ -2090,34 +1230,7 @@ clear_food
 
 {{
   "operations": [
-    {{
-      "action": "add",
-      "person": "shared",
-      "field": "dish_rating",
-      "value": {{
-        "dish": "запеканка",
-        "person": "marianna",
-        "rating": "like"
-      }}
-    }}
-  ]
-}}
-
-Пользователь:
-Марианне не понравилась запеканка.
-
-{{
-  "operations": [
-    {{
-      "action": "update",
-      "person": "shared",
-      "field": "dish_rating",
-      "value": {{
-        "dish": "запеканка",
-        "person": "marianna",
-        "rating": "dislike"
-      }}
-    }}
+    {{"action": "add", "person": "shared", "field": "dish_rating", "value": {{"dish": "запеканка", "person": "marianna", "rating": "like"}}}}
   ]
 }}
 
@@ -2126,12 +1239,7 @@ clear_food
 
 {{
   "operations": [
-    {{
-      "action": "add",
-      "person": "shared",
-      "field": "disliked_dishes",
-      "value": ["запеканка"]
-    }}
+    {{"action": "add", "person": "shared", "field": "disliked_dishes", "value": ["запеканка"]}}
   ]
 }}
 
@@ -2140,32 +1248,18 @@ clear_food
 
 {{
   "operations": [
-    {{
-      "action": "delete_all_dish",
-      "dish": "запеканка"
-    }}
+    {{"action": "delete_all_dish", "dish": "запеканка"}}
   ]
 }}
 
 ВАЖНО:
 
 Если пользователь использует:
-- удали;
-- удалить;
-- забудь;
-- убери;
-- сотри;
-- очисти;
-- больше не храни;
+- удали; удалить; забудь; убери; сотри; очисти; больше не храни;
 
-это команда изменения памяти.
+это команда изменения памяти. Не сохраняй удаляемую информацию обратно.
 
-Не сохраняй удаляемую информацию обратно.
-
-Если пользователь говорит:
-«Удали всю информацию о запеканке»
-
-используй delete_all_dish.
+Если пользователь просит очистить продукты дома — используй action "clear_food".
 
 Если пользователь даёт новую оценку тому же блюду и человеку,
 последняя оценка должна заменить предыдущую.
@@ -2174,9 +1268,7 @@ clear_food
 
 Если изменений нет:
 
-{{
-  "operations": []
-}}
+{{"operations": []}}
 """
 
     text = await ask_openai(
@@ -2189,215 +1281,203 @@ clear_food
 Не придумывай данные.
 """,
         input_text=prompt,
-        timeout=45
+        timeout=30
     )
 
     if not text:
         return []
 
     try:
+        text = text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
 
-        text = text.replace(
-            "```json",
-            ""
-        ).replace(
-            "```",
-            ""
-        ).strip()
-
-        data = json.loads(
-            text
-        )
-
-        if not isinstance(
-            data,
-            dict
-        ):
-
+        if not isinstance(data, dict):
             return []
 
-        operations = data.get(
-            "operations",
-            []
-        )
-
-        if not isinstance(
-            operations,
-            list
-        ):
-
+        operations = data.get("operations", [])
+        if not isinstance(operations, list):
             return []
 
         return operations
 
     except Exception as e:
-
-        print(
-            "MEMORY JSON ERROR:",
-            repr(e)
-        )
-
+        print("MEMORY JSON ERROR:", repr(e))
         return []
 
 
 # ============================================================
-# ОПРЕДЕЛЕНИЕ ЗАМЕНЫ
+# КОМПАКТНАЯ ИСТОРИЯ МЕНЮ (без хранения полного HTML)
 # ============================================================
 
-def detect_replacement_request(
-    user_message
-):
+MENU_ITEM_LABELS = {
+    "breakfast": "Завтрак Павла",
+    "main": "Основное",
+    "side": "Гарнир",
+    "snack": "Закуска Марианны",
+    "vegetables": "Овощи Павла",
+}
 
-    text = normalize_text(
-        user_message
-    )
+
+def extract_menu_summary(html_text):
+    """
+    Достаёт только названия блюд из раздела "МЕНЮ НА 3 ДНЯ",
+    не сохраняя весь HTML-текст меню. Используется для истории,
+    чтобы блюда не повторялись, но память не раздувалась.
+    """
+    if not html_text:
+        return {}
+
+    summary = {}
+    for key, label in MENU_ITEM_LABELS.items():
+        pattern = re.escape(label) + r"</b>\s*\n+\s*([^\n<]+)"
+        match = re.search(pattern, html_text)
+        if match:
+            dish = match.group(1).strip()
+            if dish:
+                summary[key] = dish
+
+    return summary
+
+
+def push_menu_to_history(memory_data, old_menu_html):
+    """Сворачивает предыдущее меню в компактную запись истории."""
+    if not old_menu_html:
+        return
+
+    summary = extract_menu_summary(old_menu_html)
+    if not summary:
+        return
+
+    history = memory_data["shared"].get("menu_history", [])
+    history.append(summary)
+    memory_data["shared"]["menu_history"] = history[-MENU_HISTORY_LIMIT:]
+
+
+# ============================================================
+# ОПРЕДЕЛЕНИЕ ЗАМЕНЫ / НОВОГО МЕНЮ / ТЕКУЩЕГО МЕНЮ
+# ============================================================
+
+def detect_replacement_request(user_message):
+    text = normalize_text(user_message)
 
     replacement_words = [
-        "замени",
-        "заменить",
-        "поменяй",
-        "поменять",
-        "другой",
-        "другое",
-        "надоел",
-        "надоела",
-        "надоело"
+        "замени", "заменить", "поменяй", "поменять",
+        "другой", "другое", "надоел", "надоела", "надоело"
     ]
 
-    if not any(
-        word in text
-        for word in replacement_words
-    ):
-
+    if not any(word in text for word in replacement_words):
         return None
 
-    if (
-        "завтрак" in text
-        or "завтрака" in text
-    ):
-
+    if "завтрак" in text or "завтрака" in text:
         return "breakfast"
-
-    if (
-        "основное блюдо" in text
-        or "основное" in text
-        or "обед" in text
-    ):
-
+    if "основное блюдо" in text or "основное" in text or "обед" in text:
         return "main"
-
-    if (
-        "закуск" in text
-        or "хрустящ" in text
-    ):
-
+    if "закуск" in text or "хрустящ" in text:
         return "marianna_snack"
-
-    if (
-        "овощ" in text
-        or "овощное дополнение" in text
-    ):
-
+    if "овощ" in text or "овощное дополнение" in text:
         return "pavel_vegetables"
 
     return None
 
 
-# ============================================================
-# ПРОВЕРКА НОВОГО МЕНЮ
-# ============================================================
-
-def is_new_menu_request(
-    user_message
-):
-
-    text = normalize_text(
-        user_message
-    )
+def is_new_menu_request(user_message):
+    text = normalize_text(user_message)
 
     phrases = [
-        "новое меню",
-        "составь новое меню",
-        "давай новое меню",
-        "сделай новое меню",
-        "придумай новое меню",
-        "меню на 3 дня",
+        "новое меню", "составь новое меню", "давай новое меню",
+        "сделай новое меню", "придумай новое меню", "меню на 3 дня",
         "новый цикл"
     ]
 
-    return any(
-        phrase in text
-        for phrase in phrases
-    )
+    return any(phrase in text for phrase in phrases)
 
 
-# ============================================================
-# ПРОВЕРКА ТЕКУЩЕГО МЕНЮ
-# ============================================================
-
-def is_current_menu_request(
-    user_message
-):
-
-    text = normalize_text(
-        user_message
-    )
+def is_current_menu_request(user_message):
+    text = normalize_text(user_message)
 
     phrases = [
-        "что есть сегодня",
-        "что у нас сегодня",
-        "какое меню сегодня",
-        "что кушать сегодня",
-        "что покушать сегодня",
-        "текущее меню"
+        "что есть сегодня", "что у нас сегодня", "какое меню сегодня",
+        "что кушать сегодня", "что покушать сегодня", "текущее меню"
     ]
 
-    return any(
-        phrase in text
-        for phrase in phrases
-    )
+    return any(phrase in text for phrase in phrases)
+
+
+# ============================================================
+# ГЕНЕРАЦИЯ НОВОГО МЕНЮ
+# ============================================================
+
+async def generate_new_menu(message, user_id, memory_data):
+    """
+    Общая функция создания нового меню на 3 дня.
+    Используется и из команды в чате, и из кнопки — без дублирования кода.
+    """
+
+    memory_context = serialize_memory(memory_data)
+
+    prompt = f"""
+ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
+
+{memory_context}
+
+ПОЛЬЗОВАТЕЛЬ ПРОСИТ СОСТАВИТЬ НОВОЕ МЕНЮ НА 3 ДНЯ.
+
+Составь полное новое меню на 3 дня.
+
+Обязательно:
+- учитывай память;
+- учитывай продукты дома;
+- учитывай предпочтения;
+- учитывай оценки;
+- учитывай историю меню;
+- не повторяй недавно использованные основные блюда без необходимости;
+- соблюдай все ограничения Марианны;
+- учитывай цель Павла;
+- минимизируй количество готовки.
+
+После создания меню оно станет текущим меню.
+
+Отвечай сразу готовым меню на русском языке.
+"""
+
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90)
+
+    if not answer:
+        await message.reply_text(
+            "ИИ слишком долго отвечает 😔\n"
+            "Попробуй ещё раз через несколько секунд.",
+            reply_markup=main_keyboard()
+        )
+        return
+
+    old_menu = memory_data["shared"].get("current_menu")
+    push_menu_to_history(memory_data, old_menu)
+    memory_data["shared"]["current_menu"] = answer
+
+    await save_user_memory(user_id, memory_data)
+    print("NEW MENU SAVED AS CURRENT MENU")
+
+    await send_long_message(message, answer, reply_markup=main_keyboard())
 
 
 # ============================================================
 # ЗАМЕНА ОДНОГО ЭЛЕМЕНТА
 # ============================================================
 
-async def replace_single_menu_item(
-    current_menu,
-    user_message,
-    replacement_type,
-    memory_data
-):
-
+async def replace_single_menu_item(current_menu, user_message, replacement_type, memory_data):
     if not current_menu:
         return None
 
-    memory_context = json.dumps(
-        memory_data,
-        ensure_ascii=False,
-        separators=(",", ":")
-    )
-
-    if len(memory_context) > 30000:
-
-        memory_context = memory_context[
-            :30000
-        ]
+    memory_context = serialize_memory(memory_data)
 
     type_names = {
         "breakfast": "ЗАВТРАК ПАВЛА",
         "main": "ОСНОВНОЕ БЛЮДО",
-        "marianna_snack": (
-            "ХРУСТЯЩАЯ ЗАКУСКА МАРИАННЫ"
-        ),
-        "pavel_vegetables": (
-            "ОВОЩНОЕ ДОПОЛНЕНИЕ ПАВЛА"
-        )
+        "marianna_snack": "ХРУСТЯЩАЯ ЗАКУСКА МАРИАННЫ",
+        "pavel_vegetables": "ОВОЩНОЕ ДОПОЛНЕНИЕ ПАВЛА"
     }
 
-    target_name = type_names[
-        replacement_type
-    ]
+    target_name = type_names[replacement_type]
 
     prompt = f"""
 У нас уже есть текущее меню на 3 дня.
@@ -2417,21 +1497,18 @@ async def replace_single_menu_item(
 
 КРИТИЧЕСКИ ВАЖНО:
 
-НЕ создавай новый цикл с нуля.
+НЕ создавай новое меню с нуля.
 
 Сохрани без изменений:
 - остальные блюда;
 - остальные элементы меню;
 - количество дней;
-- общую структуру цикла.
+- общую структуру.
 
 Замени ТОЛЬКО указанный элемент.
 
-Если пользователь предложил конкретное блюдо,
-используй именно его.
-
-Если конкретное блюдо не указано,
-сам выбери подходящую замену с учётом памяти.
+Если пользователь предложил конкретное блюдо, используй именно его.
+Если конкретное блюдо не указано, сам выбери подходящую замену с учётом памяти.
 
 При выборе учитывай:
 - ограничения Марианны;
@@ -2449,141 +1526,131 @@ async def replace_single_menu_item(
 - КБЖУ;
 - список покупок.
 
-Покажи полный обновлённый цикл,
-чтобы пользователь видел итоговое меню целиком.
-
-Сохрани все остальные элементы текущего меню.
+Покажи полное обновлённое меню целиком.
 
 Отвечай на русском языке.
 """
 
-    return await ask_openai(
-        instructions=SYSTEM_PROMPT,
-        input_text=prompt,
-        timeout=120
-    )
+    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90)
 
 
 # ============================================================
 # ДЛИННЫЕ TELEGRAM СООБЩЕНИЯ
 # ============================================================
 
-async def send_long_message(
-    message,
-    text,
-    reply_markup=None
-):
-
+async def send_long_message(message, text, reply_markup=None):
     max_length = 3900
     parse_mode = "HTML"
 
     if len(text) <= max_length:
-
-        await message.reply_text(
-            text,
-            parse_mode=parse_mode,
-            reply_markup=reply_markup
-        )
-
+        await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
         return
 
     while len(text) > max_length:
-
-        # Prefer cutting after a closed expandable block,
-        # so HTML tags stay valid across parts.
-        cut = text.rfind(
-            "</blockquote>",
-            0,
-            max_length
-        )
+        cut = text.rfind("</blockquote>", 0, max_length)
 
         if cut > 500:
             cut = cut + len("</blockquote>")
         else:
-            cut = text.rfind(
-                "\n\n",
-                0,
-                max_length
-            )
-
+            cut = text.rfind("\n\n", 0, max_length)
             if cut < 1000:
-                cut = text.rfind(
-                    "\n",
-                    0,
-                    max_length
-                )
-
+                cut = text.rfind("\n", 0, max_length)
             if cut < 1000:
                 cut = max_length
 
         part = text[:cut]
-
-        await message.reply_text(
-            part,
-            parse_mode=parse_mode
-        )
-
-        text = text[
-            cut:
-        ].lstrip()
+        await message.reply_text(part, parse_mode=parse_mode)
+        text = text[cut:].lstrip()
 
     if text:
-
-        await message.reply_text(
-            text,
-            parse_mode=parse_mode,
-            reply_markup=reply_markup
-        )
+        await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
 
 
 # ============================================================
-# ФОРМАТ ПРОДУКТОВ
+# ЛОКАЛЬНОЕ ФОРМАТИРОВАНИЕ (без обращения к модели)
 # ============================================================
 
-def format_food_at_home(
-    food
-):
-
+def format_food_at_home(food):
     if not food:
+        return "🏠 Сейчас в списке продуктов дома ничего нет."
 
-        return (
-            "🏠 Сейчас в списке продуктов дома ничего нет."
-        )
+    lines = ["🏠 <b>Что есть дома:</b>", ""]
+    for name, amount in food.items():
+        lines.append(f"• {name}: {amount}")
 
-    lines = [
-        "🏠 <b>Что есть дома:</b>",
-        ""
+    return "\n".join(lines)
+
+
+RATING_LABELS = {
+    "like": "❤️ нравится",
+    "dislike": "😐 не нравится",
+    "never": "🚫 больше не готовить",
+}
+
+
+def format_person_info(memory_data, person_key, person_label):
+    person = memory_data.get(person_key, {})
+    shared = memory_data.get("shared", {})
+
+    lines = [f"ℹ️ <b>Информация о {person_label}</b>", ""]
+
+    height = person.get("height_cm")
+    weight = person.get("weight_kg")
+    goal = person.get("goal")
+
+    lines.append(f"Рост: {height if height is not None else 'не указан'} см")
+    lines.append(f"Вес: {weight if weight is not None else 'не указан'} кг")
+    lines.append(f"Цель: {goal if goal else 'не указана'}")
+
+    other = person.get("other", {})
+    other = {k: v for k, v in other.items() if k != "user_name"}
+
+    if other:
+        lines.append("")
+        lines.append("<b>Дополнительно:</b>")
+        for key, value in other.items():
+            lines.append(f"• {key}: {value}")
+
+    ratings = [
+        r for r in shared.get("dish_ratings", [])
+        if isinstance(r, dict) and r.get("person") == person_key
     ]
 
-    for name, amount in food.items():
+    if ratings:
+        lines.append("")
+        lines.append("<b>Оценки блюд:</b>")
+        for r in ratings:
+            dish = r.get("dish", "?")
+            rating_label = RATING_LABELS.get(r.get("rating"), r.get("rating", ""))
+            lines.append(f"• {dish} — {rating_label}")
 
-        lines.append(
-            f"• {name}: {amount}"
-        )
+    liked = shared.get("liked_dishes", [])
+    disliked = shared.get("disliked_dishes", [])
 
-    return "\n".join(
-        lines
-    )
+    if liked:
+        lines.append("")
+        lines.append("<b>Понравившиеся блюда (общие):</b>")
+        for item in liked:
+            name = item if isinstance(item, str) else item.get("dish", item.get("name", str(item)))
+            lines.append(f"• {name}")
+
+    if disliked:
+        lines.append("")
+        lines.append("<b>Блюда, которые нельзя повторять (общие):</b>")
+        for item in disliked:
+            name = item if isinstance(item, str) else item.get("dish", item.get("name", str(item)))
+            lines.append(f"• {name}")
+
+    return "\n".join(lines)
 
 
 # ============================================================
 # START
 # ============================================================
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    context.user_data.pop(
-        "replacement_type",
-        None
-    )
-
-    context.user_data.pop(
-        "awaiting_input",
-        None
-    )
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop("replacement_type", None)
+    context.user_data.pop("awaiting_input", None)
 
     await update.message.reply_text(
         "Привет! 🍽️\n\n"
@@ -2594,357 +1661,77 @@ async def start(
 
 
 # ============================================================
-# НОВЫЙ ЦИКЛ
-# ============================================================
-
-async def generate_new_cycle(
-    update,
-    context,
-    user_id,
-    memory_data
-):
-
-    await update.message.reply_text(
-        "Готовлю новый цикл на 3 дня 🍽️\n"
-        "Учитываю продукты дома, ваши предпочтения "
-        "и предыдущие меню..."
-    )
-
-    memory_context = json.dumps(
-        memory_data,
-        ensure_ascii=False,
-        separators=(",", ":")
-    )
-
-    if len(memory_context) > 30000:
-
-        print(
-            "WARNING: MEMORY TOO LARGE:",
-            len(memory_context)
-        )
-
-        memory_context = memory_context[
-            :30000
-        ]
-
-    prompt = f"""
-ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
-
-{memory_context}
-
-ПОЛЬЗОВАТЕЛЬ ПРОСИТ СОСТАВИТЬ НОВЫЙ ЦИКЛ
-НА 3 ДНЯ.
-
-Составь полный новый цикл на 3 дня.
-
-Обязательно:
-- учитывай память;
-- учитывай продукты дома;
-- учитывай предпочтения;
-- учитывай оценки;
-- учитывай историю меню;
-- не повторяй недавно использованные основные блюда без необходимости;
-- соблюдай все ограничения Марианны;
-- учитывай цель Павла;
-- минимизируй количество готовки.
-
-После создания меню оно станет текущим меню.
-
-Отвечай сразу готовым меню на русском языке.
-"""
-
-    answer = await ask_openai(
-        instructions=SYSTEM_PROMPT,
-        input_text=prompt,
-        timeout=120
-    )
-
-    if not answer:
-
-        await update.message.reply_text(
-            "ИИ слишком долго отвечает 😔\n"
-            "Попробуй ещё раз через несколько секунд.",
-            reply_markup=main_keyboard()
-        )
-
-        return
-
-    old_menu = memory_data[
-        "shared"
-    ].get(
-        "current_menu"
-    )
-
-    if old_menu:
-
-        memory_data[
-            "shared"
-        ][
-            "menu_history"
-        ].append(
-            old_menu
-        )
-
-    memory_data[
-        "shared"
-    ][
-        "current_menu"
-    ] = answer
-
-    await save_user_memory(
-        user_id,
-        memory_data
-    )
-
-    print(
-        "NEW MENU SAVED AS CURRENT MENU"
-    )
-
-    await send_long_message(
-        update.message,
-        answer,
-        reply_markup=main_keyboard()
-    )
-
-
-# ============================================================
 # CALLBACK — КНОПКИ
 # ============================================================
 
-async def button_handler(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-
     await query.answer()
 
     data = query.data
+    user_id = str(update.effective_user.id)
 
     # ========================================================
     # ГЛАВНОЕ МЕНЮ
     # ========================================================
-
     if data == "main_menu":
-
-        context.user_data.pop(
-            "replacement_type",
-            None
-        )
-
-        context.user_data.pop(
-            "awaiting_input",
-            None
-        )
+        context.user_data.pop("replacement_type", None)
+        context.user_data.pop("awaiting_input", None)
 
         await query.edit_message_text(
-            "🍽️ <b>Главное меню</b>\n\n"
-            "Что будем делать?",
+            "🍽️ <b>Главное меню</b>\n\nЧто будем делать?",
+            parse_mode="HTML",
             reply_markup=main_keyboard()
         )
-
         return
 
     # ========================================================
-    # НОВЫЙ ЦИКЛ
+    # НОВОЕ МЕНЮ
     # ========================================================
+    if data == "new_menu":
+        context.user_data.pop("replacement_type", None)
+        context.user_data.pop("awaiting_input", None)
 
-    if data == "new_cycle":
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
 
-        context.user_data.pop(
-            "replacement_type",
-            None
-        )
+        await query.edit_message_text("🆕 <b>Новое меню на 3 дня</b>\n\nСоставляю меню...", parse_mode="HTML")
 
-        context.user_data.pop(
-            "awaiting_input",
-            None
-        )
-
-        user_id = str(
-            update.effective_user.id
-        )
-
-        memory_data = await load_user_memory(
-            user_id,
-            update.effective_user.first_name
-        )
-
-        await query.edit_message_text(
-            "🆕 <b>Новый цикл на 3 дня</b>\n\n"
-            "Составляю меню..."
-        )
-
-        memory_context = json.dumps(
-            memory_data,
-            ensure_ascii=False,
-            separators=(",", ":")
-        )
-
-        if len(memory_context) > 30000:
-
-            memory_context = memory_context[
-                :30000
-            ]
-
-        prompt = f"""
-ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
-
-{memory_context}
-
-ПОЛЬЗОВАТЕЛЬ ПРОСИТ СОСТАВИТЬ НОВЫЙ ЦИКЛ
-НА 3 ДНЯ.
-
-Составь полный новый цикл на 3 дня.
-
-Обязательно:
-- учитывай память;
-- учитывай продукты дома;
-- учитывай предпочтения;
-- учитывай оценки;
-- учитывай историю меню;
-- не повторяй недавно использованные основные блюда без необходимости;
-- соблюдай все ограничения Марианны;
-- учитывай цель Павла;
-- минимизируй количество готовки.
-
-После создания меню оно станет текущим меню.
-
-Отвечай сразу готовым меню на русском языке.
-"""
-
-        answer = await ask_openai(
-            instructions=SYSTEM_PROMPT,
-            input_text=prompt,
-            timeout=120
-        )
-
-        if not answer:
-
-            await query.message.reply_text(
-                "ИИ слишком долго отвечает 😔\n"
-                "Попробуй ещё раз через несколько секунд.",
-                reply_markup=main_keyboard()
-            )
-
-            return
-
-        old_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
-
-        if old_menu:
-
-            memory_data[
-                "shared"
-            ][
-                "menu_history"
-            ].append(
-                old_menu
-            )
-
-        memory_data[
-            "shared"
-        ][
-            "current_menu"
-        ] = answer
-
-        await save_user_memory(
-            user_id,
-            memory_data
-        )
-
-        print(
-            "NEW MENU SAVED AS CURRENT MENU"
-        )
-
-        await send_long_message(
-            query.message,
-            answer,
-            reply_markup=main_keyboard()
-        )
-
+        await generate_new_menu(query.message, user_id, memory_data)
         return
 
     # ========================================================
-    # ЗАМЕНА БЛЮДА — МЕНЮ
+    # ЗАМЕНА БЛЮДА — МЕНЮ ВЫБОРА
     # ========================================================
-
     if data == "replace_menu":
-
         await query.edit_message_text(
-            "🔄 <b>Что заменить?</b>\n\n"
-            "Выбери только один элемент текущего цикла:",
+            "🔄 <b>Что заменить?</b>\n\nВыбери только один элемент текущего меню:",
+            parse_mode="HTML",
             reply_markup=replace_keyboard()
         )
-
         return
 
-    # ========================================================
-    # КОНКРЕТНЫЙ ТИП ЗАМЕНЫ
-    # ========================================================
-
     replacement_map = {
-        "replace_breakfast": (
-            "breakfast",
-            "🍳 Завтрак Павла"
-        ),
-        "replace_main": (
-            "main",
-            "🍗 Основное блюдо"
-        ),
-        "replace_snack": (
-            "marianna_snack",
-            "🥨 Закуска Марианны"
-        ),
-        "replace_vegetables": (
-            "pavel_vegetables",
-            "🥦 Овощи Павла"
-        )
+        "replace_breakfast": ("breakfast", "🍳 Завтрак Павла"),
+        "replace_main": ("main", "🍗 Основное блюдо"),
+        "replace_snack": ("marianna_snack", "🥨 Закуска Марианны"),
+        "replace_vegetables": ("pavel_vegetables", "🥦 Овощи Павла")
     }
 
     if data in replacement_map:
+        replacement_type, title = replacement_map[data]
 
-        replacement_type, title = (
-            replacement_map[data]
-        )
-
-        user_id = str(
-            update.effective_user.id
-        )
-
-        memory_data = await load_user_memory(
-            user_id,
-            update.effective_user.first_name
-        )
-
-        current_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+        current_menu = memory_data["shared"].get("current_menu")
 
         if not current_menu:
-
             await query.edit_message_text(
-                "У нас сейчас нет сохранённого "
-                "текущего меню 😔\n\n"
-                "Сначала создай новый цикл.",
+                "У нас сейчас нет сохранённого текущего меню 😔\n\nСначала создай новое меню.",
                 reply_markup=main_keyboard()
             )
-
             return
 
-        context.user_data[
-            "replacement_type"
-        ] = replacement_type
-
-        context.user_data[
-            "awaiting_input"
-        ] = "replacement"
+        context.user_data["replacement_type"] = replacement_type
+        context.user_data["awaiting_input"] = "replacement"
 
         await query.edit_message_text(
             f"{title}\n\n"
@@ -2953,66 +1740,35 @@ async def button_handler(
             "• «на сырники»\n"
             "• «на куриные котлеты»\n"
             "• «давай другой»\n\n"
-            "Если конкретное блюдо не укажешь — "
-            "я сама выберу подходящее.",
+            "Если конкретное блюдо не укажешь — я сама выберу подходящее.",
             reply_markup=back_keyboard()
         )
-
         return
 
     # ========================================================
     # ПРОДУКТЫ
     # ========================================================
-
     if data == "products":
-
         await query.edit_message_text(
-            "🛒 <b>Продукты</b>\n\n"
-            "Что хочешь сделать?",
+            "🛒 <b>Продукты</b>\n\nЧто хочешь сделать?",
+            parse_mode="HTML",
             reply_markup=products_keyboard()
         )
-
         return
 
-    # ========================================================
-    # ЧТО ЕСТЬ ДОМА
-    # ========================================================
-
     if data == "food_home":
-
-        user_id = str(
-            update.effective_user.id
-        )
-
-        memory_data = await load_user_memory(
-            user_id,
-            update.effective_user.first_name
-        )
-
-        food = memory_data[
-            "shared"
-        ].get(
-            "food_at_home",
-            {}
-        )
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+        food = memory_data["shared"].get("food_at_home", {})
 
         await query.edit_message_text(
             format_food_at_home(food),
             parse_mode="HTML",
             reply_markup=products_keyboard()
         )
-
         return
 
-    # ========================================================
-    # ИЗМЕНИТЬ ПРОДУКТЫ
-    # ========================================================
-
     if data == "edit_food":
-
-        context.user_data[
-            "awaiting_input"
-        ] = "food"
+        context.user_data["awaiting_input"] = "food"
 
         await query.edit_message_text(
             "✏️ <b>Изменить продукты</b>\n\n"
@@ -3026,97 +1782,144 @@ async def button_handler(
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
+        return
 
+    if data == "clear_food_home":
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+        memory_data["shared"]["food_at_home"] = {}
+        await save_user_memory(user_id, memory_data)
+
+        await query.edit_message_text(
+            "🧹 Список продуктов дома очищен.",
+            parse_mode="HTML",
+            reply_markup=products_keyboard()
+        )
         return
 
     # ========================================================
     # ПРЕДПОЧТЕНИЯ
     # ========================================================
-
     if data == "preferences":
-
         await query.edit_message_text(
-            "❤️ <b>Предпочтения</b>\n\n"
-            "Чьи предпочтения хочешь изменить?",
+            "❤️ <b>Предпочтения</b>\n\nЧто хочешь сделать?",
             parse_mode="HTML",
             reply_markup=preferences_keyboard()
         )
-
         return
 
-    # ========================================================
-    # МАРИАННА
-    # ========================================================
-
     if data == "pref_marianna":
-
-        context.user_data[
-            "awaiting_input"
-        ] = "marianna_preferences"
+        context.user_data["awaiting_input"] = "marianna_preferences"
 
         await query.edit_message_text(
             "🧑 <b>Предпочтения Марианны</b>\n\n"
-            "Напиши, что хочешь добавить, изменить "
-            "или удалить.\n\n"
+            "Напиши, что хочешь добавить, изменить или удалить.\n\n"
             "Например:\n"
             "• «Марианне нравится лазанья»\n"
             "• «Марианна больше не хочет есть сырники»\n"
-            "• «Марианна любит курицу»\n"
             "• «Забудь, что Марианне нравится лазанья»",
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
-
         return
 
-    # ========================================================
-    # ПАВЕЛ
-    # ========================================================
-
     if data == "pref_pavel":
-
-        context.user_data[
-            "awaiting_input"
-        ] = "pavel_preferences"
+        context.user_data["awaiting_input"] = "pavel_preferences"
 
         await query.edit_message_text(
             "👨 <b>Предпочтения Павла</b>\n\n"
-            "Напиши, что хочешь добавить, изменить "
-            "или удалить.\n\n"
+            "Напиши, что хочешь добавить, изменить или удалить.\n\n"
             "Например:\n"
             "• «Павлу нравится паста»\n"
             "• «Павел не любит жирные соусы»\n"
-            "• «Павлу надоели котлеты»\n"
             "• «Забудь, что Павел любит рис»",
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
-
         return
 
-    # ========================================================
-    # ОЦЕНКА БЛЮДА
-    # ========================================================
+    if data == "info_marianna":
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+
+        await query.edit_message_text(
+            format_person_info(memory_data, "marianna", "Марианне"),
+            parse_mode="HTML",
+            reply_markup=preferences_keyboard()
+        )
+        return
+
+    if data == "info_pavel":
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+
+        await query.edit_message_text(
+            format_person_info(memory_data, "pavel", "Павле"),
+            parse_mode="HTML",
+            reply_markup=preferences_keyboard()
+        )
+        return
 
     if data == "rate_dish":
-
-        context.user_data[
-            "awaiting_input"
-        ] = "rating"
+        context.user_data["awaiting_input"] = "rating"
 
         await query.edit_message_text(
             "⭐ <b>Оценить блюдо</b>\n\n"
             "Напиши, кто и как оценил блюдо.\n\n"
             "Например:\n"
             "❤️ «Марианне очень понравились сырники»\n"
-            "🙂 «Павлу нормально»\n"
             "😐 «Марианне не понравились котлеты»\n"
             "🚫 «Павлу больше никогда не готовить пасту»\n\n"
             "Последняя оценка будет заменять предыдущую.",
             parse_mode="HTML",
             reply_markup=back_keyboard()
         )
+        return
 
+
+# ============================================================
+# ЛОКАЛЬНЫЕ ВЕТКИ БЕЗ ВТОРОГО ВЫЗОВА GPT
+# (продукты / предпочтения / оценка — быстрый путь)
+# ============================================================
+
+QUICK_STATES = {"food", "marianna_preferences", "pavel_preferences", "rating"}
+
+
+async def handle_quick_memory_state(update, context, user_id, memory_data, state, user_message):
+    """
+    Для веток "Изменить продукты", "Предпочтения Марианны/Павла", "Оценить блюдо"
+    не нужен основной GPT-вызов на генерацию текста — нужно только
+    распознать и применить изменение памяти, а затем коротко подтвердить.
+    Это убирает один из двух последовательных вызовов модели и ускоряет ответ.
+    """
+
+    operations = await extract_memory_operations(user_message, memory_data)
+    print("MEMORY OPERATIONS (quick):", operations)
+
+    if operations:
+        memory_data = apply_memory_updates(memory_data, operations)
+        await save_user_memory(user_id, memory_data)
+
+    context.user_data.pop("awaiting_input", None)
+
+    if state == "food":
+        food = memory_data["shared"].get("food_at_home", {})
+        text = "✅ Обновила продукты дома.\n\n" + format_food_at_home(food)
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=products_keyboard())
+        return
+
+    if state == "marianna_preferences":
+        text = "✅ Записала.\n\n" + format_person_info(memory_data, "marianna", "Марианне")
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=preferences_keyboard())
+        return
+
+    if state == "pavel_preferences":
+        text = "✅ Записала.\n\n" + format_person_info(memory_data, "pavel", "Павле")
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=preferences_keyboard())
+        return
+
+    if state == "rating":
+        await update.message.reply_text(
+            "✅ Записала оценку. Учту её в следующих меню.",
+            reply_markup=preferences_keyboard()
+        )
         return
 
 
@@ -3124,360 +1927,143 @@ async def button_handler(
 # ОСНОВНОЙ ЧАТ
 # ============================================================
 
-async def chat(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not update.message:
+async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
         return
 
-    if not update.message.text:
+    user_id = str(update.effective_user.id)
+    user_message = update.message.text.strip()
+
+    print("MESSAGE:", user_message)
+
+    replacement_type_from_button = context.user_data.get("replacement_type")
+    awaiting_input = context.user_data.get("awaiting_input")
+
+    memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+
+    # ========================================================
+    # Быстрый путь: продукты / предпочтения / оценка блюда —
+    # без основного GPT-вызова, только извлечение/применение памяти.
+    # ========================================================
+    if awaiting_input in QUICK_STATES and not replacement_type_from_button:
+        await handle_quick_memory_state(update, context, user_id, memory_data, awaiting_input, user_message)
         return
 
-    user_id = str(
-        update.effective_user.id
-    )
-
-    user_message = (
-        update.message.text.strip()
-    )
-
-    print(
-        "MESSAGE:",
-        user_message
-    )
-
     # ========================================================
-    # Состояние после кнопки
+    # Замена одного блюда после нажатия кнопки
     # ========================================================
+    if replacement_type_from_button:
+        current_menu = memory_data["shared"].get("current_menu")
 
-    replacement_type_from_button = (
-        context.user_data.get(
-            "replacement_type"
-        )
-    )
+        if not current_menu:
+            context.user_data.pop("replacement_type", None)
+            context.user_data.pop("awaiting_input", None)
 
-    awaiting_input = (
-        context.user_data.get(
-            "awaiting_input"
-        )
-    )
+            await update.message.reply_text(
+                "У нас сейчас нет сохранённого текущего меню 😔\n\nСначала создай новое меню.",
+                reply_markup=main_keyboard()
+            )
+            return
 
-    # ========================================================
-    # Загружаем память
-    # ========================================================
+        await update.message.reply_text("🔄 Хорошо, заменяю только это блюдо...")
 
-    memory_data = await load_user_memory(
-        user_id,
-        update.effective_user.first_name
-    )
-
-    # ========================================================
-    # Память
-    #
-    # ВАЖНО:
-    # GPT для памяти вызывается только если сообщение
-    # действительно похоже на изменение памяти.
-    # ========================================================
-
-    operations = []
-
-    if should_check_memory(
-        user_message
-    ):
-
-        operations = await extract_memory_operations(
-            user_message,
-            memory_data
+        updated_menu = await replace_single_menu_item(
+            current_menu, user_message, replacement_type_from_button, memory_data
         )
 
-        print(
-            "MEMORY OPERATIONS:",
-            operations
-        )
+        context.user_data.pop("replacement_type", None)
+        context.user_data.pop("awaiting_input", None)
+
+        if updated_menu:
+            push_menu_to_history(memory_data, current_menu)
+            memory_data["shared"]["current_menu"] = updated_menu
+
+            await save_user_memory(user_id, memory_data)
+            print("CURRENT MENU UPDATED")
+
+            await send_long_message(update.message, updated_menu, reply_markup=main_keyboard())
+        else:
+            await update.message.reply_text(
+                "Не получилось заменить блюдо 😔\n\nПопробуй ещё раз.",
+                reply_markup=main_keyboard()
+            )
+        return
+
+    # ========================================================
+    # Память (общий чат, не спец-состояние)
+    # ========================================================
+    if should_check_memory(user_message):
+        operations = await extract_memory_operations(user_message, memory_data)
+        print("MEMORY OPERATIONS:", operations)
 
         if operations:
-
-            old_memory = json.dumps(
-                memory_data,
-                ensure_ascii=False,
-                sort_keys=True
-            )
-
-            memory_data = apply_memory_updates(
-                memory_data,
-                operations
-            )
-
-            new_memory = json.dumps(
-                memory_data,
-                ensure_ascii=False,
-                sort_keys=True
-            )
-
-            if old_memory != new_memory:
-
-                await save_user_memory(
-                    user_id,
-                    memory_data
-                )
+            memory_data = apply_memory_updates(memory_data, operations)
+            await save_user_memory(user_id, memory_data)
 
     # ========================================================
-    # Если после кнопки выбран тип замены
+    # Спрашивают текущее меню
     # ========================================================
-
-    if replacement_type_from_button:
-
-        current_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
-
-        if not current_menu:
-
-            context.user_data.pop(
-                "replacement_type",
-                None
-            )
-
-            context.user_data.pop(
-                "awaiting_input",
-                None
-            )
-
-            await update.message.reply_text(
-                "У нас сейчас нет сохранённого "
-                "текущего меню 😔\n\n"
-                "Сначала создай новый цикл.",
-                reply_markup=main_keyboard()
-            )
-
-            return
-
-        await update.message.reply_text(
-            "🔄 Хорошо, заменяю только это блюдо..."
-        )
-
-        updated_menu = await replace_single_menu_item(
-            current_menu,
-            user_message,
-            replacement_type_from_button,
-            memory_data
-        )
-
-        context.user_data.pop(
-            "replacement_type",
-            None
-        )
-
-        context.user_data.pop(
-            "awaiting_input",
-            None
-        )
-
-        if updated_menu:
-
-            old_menu = memory_data[
-                "shared"
-            ].get(
-                "current_menu"
-            )
-
-            if old_menu:
-
-                memory_data[
-                    "shared"
-                ][
-                    "menu_history"
-                ].append(
-                    old_menu
-                )
-
-            memory_data[
-                "shared"
-            ][
-                "current_menu"
-            ] = updated_menu
-
-            await save_user_memory(
-                user_id,
-                memory_data
-            )
-
-            print(
-                "CURRENT MENU UPDATED"
-            )
-
-            await send_long_message(
-                update.message,
-                updated_menu,
-                reply_markup=main_keyboard()
-            )
-
-            return
-
-        else:
-
-            await update.message.reply_text(
-                "Не получилось заменить блюдо 😔\n\n"
-                "Попробуй ещё раз.",
-                reply_markup=main_keyboard()
-            )
-
-            return
-
-    # ========================================================
-    # Если спрашивают текущее меню
-    # ========================================================
-
-    if is_current_menu_request(
-        user_message
-    ):
-
-        current_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
+    if is_current_menu_request(user_message):
+        current_menu = memory_data["shared"].get("current_menu")
 
         if current_menu:
-
-            await send_long_message(
-                update.message,
-                current_menu,
-                reply_markup=main_keyboard()
-            )
-
-            return
-
+            await send_long_message(update.message, current_menu, reply_markup=main_keyboard())
         else:
-
             await update.message.reply_text(
                 "Сейчас сохранённого меню нет 🍽️\n\n"
-                "Нажми «🆕 Новый цикл на 3 дня», "
-                "и я составлю новый цикл.",
+                "Нажми «🆕 Новое меню на 3 дня», и я составлю новое.",
                 reply_markup=main_keyboard()
             )
-
-            return
+        return
 
     # ========================================================
-    # Обычная текстовая замена
+    # Обычная текстовая замена (без кнопки)
     # ========================================================
-
-    replacement_type = detect_replacement_request(
-        user_message
-    )
+    replacement_type = detect_replacement_request(user_message)
 
     if replacement_type:
-
-        current_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
+        current_menu = memory_data["shared"].get("current_menu")
 
         if not current_menu:
-
             await update.message.reply_text(
-                "У нас сейчас нет сохранённого "
-                "текущего меню, поэтому мне нечего заменять 😔\n\n"
-                "Нажми «🆕 Новый цикл на 3 дня».",
+                "У нас сейчас нет сохранённого текущего меню, поэтому мне нечего заменять 😔\n\n"
+                "Нажми «🆕 Новое меню на 3 дня».",
                 reply_markup=main_keyboard()
             )
-
             return
 
-        await update.message.reply_text(
-            "🔄 Хорошо, заменяю только это блюдо "
-            "и сохраняю остальные элементы цикла..."
-        )
+        await update.message.reply_text("🔄 Хорошо, заменяю только это блюдо и сохраняю остальные элементы меню...")
 
-        updated_menu = await replace_single_menu_item(
-            current_menu,
-            user_message,
-            replacement_type,
-            memory_data
-        )
+        updated_menu = await replace_single_menu_item(current_menu, user_message, replacement_type, memory_data)
 
         if updated_menu:
+            push_menu_to_history(memory_data, current_menu)
+            memory_data["shared"]["current_menu"] = updated_menu
 
-            old_menu = memory_data[
-                "shared"
-            ].get(
-                "current_menu"
-            )
+            await save_user_memory(user_id, memory_data)
+            print("CURRENT MENU UPDATED")
 
-            if old_menu:
-
-                memory_data[
-                    "shared"
-                ][
-                    "menu_history"
-                ].append(
-                    old_menu
-                )
-
-            memory_data[
-                "shared"
-            ][
-                "current_menu"
-            ] = updated_menu
-
-            await save_user_memory(
-                user_id,
-                memory_data
-            )
-
-            print(
-                "CURRENT MENU UPDATED"
-            )
-
-            await send_long_message(
-                update.message,
-                updated_menu,
-                reply_markup=main_keyboard()
-            )
-
-            return
-
+            await send_long_message(update.message, updated_menu, reply_markup=main_keyboard())
         else:
-
             await update.message.reply_text(
                 "Не получилось заменить блюдо 😔\n"
-                "Попробуй написать, например: "
-                "«Замени завтрак на сырники».",
+                "Попробуй написать, например: «Замени завтрак на сырники».",
                 reply_markup=main_keyboard()
             )
-
-            return
-
-    # ========================================================
-    # Контекст памяти
-    # ========================================================
-
-    memory_context = json.dumps(
-        memory_data,
-        ensure_ascii=False,
-        separators=(",", ":")
-    )
-
-    if len(memory_context) > 30000:
-
-        print(
-            "WARNING: MEMORY TOO LARGE:",
-            len(memory_context)
-        )
-
-        memory_context = memory_context[
-            :30000
-        ]
+        return
 
     # ========================================================
-    # Основной запрос
+    # Новое меню одной фразой в чате
     # ========================================================
+    if is_new_menu_request(user_message):
+        await generate_new_menu(update.message, user_id, memory_data)
+        context.user_data.pop("awaiting_input", None)
+        return
+
+    # ========================================================
+    # Обычный запрос — основной GPT
+    # ========================================================
+    memory_context = serialize_memory(memory_data)
 
     prompt = f"""
 ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
@@ -3496,8 +2082,7 @@ async def chat(
 
 - не спрашивай повторно то, что уже известно;
 - данные Марианны и Павла не смешивай;
-- если пользователь спрашивает конкретное сохранённое значение,
-  ответь непосредственно;
+- если пользователь спрашивает конкретное сохранённое значение, ответь непосредственно;
 - если пользователь просит новое меню — сразу составляй его;
 - учитывай продукты дома;
 - учитывай предпочтения;
@@ -3509,107 +2094,30 @@ async def chat(
 не утверждай, что она всё ещё существует в памяти.
 
 Если пользователь просит новое меню,
-после создания полного меню оно должно считаться
-новым текущим меню.
+после создания полного меню оно должно считаться новым текущим меню.
 
 Если информации действительно не хватает для выполнения задачи,
 задай только необходимый вопрос.
 """
 
-    # ========================================================
-    # Основной GPT
-    # ========================================================
-
-    answer = await ask_openai(
-        instructions=SYSTEM_PROMPT,
-        input_text=prompt,
-        timeout=120
-    )
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90)
 
     if not answer:
-
         await update.message.reply_text(
-            "ИИ слишком долго отвечает 😔\n\n"
-            "Попробуй ещё раз через несколько секунд.",
+            "ИИ слишком долго отвечает 😔\n\nПопробуй ещё раз через несколько секунд.",
             reply_markup=main_keyboard()
         )
-
         return
 
-    print(
-        "OPENAI OK"
-    )
+    print("OPENAI OK")
 
-    # ========================================================
-    # Если это новое меню — сохраняем его
-    # ========================================================
-
-    if is_new_menu_request(
-        user_message
-    ):
-
-        old_menu = memory_data[
-            "shared"
-        ].get(
-            "current_menu"
-        )
-
-        if old_menu:
-
-            memory_data[
-                "shared"
-            ][
-                "menu_history"
-            ].append(
-                old_menu
-            )
-
-        memory_data[
-            "shared"
-        ][
-            "current_menu"
-        ] = answer
-
-        await save_user_memory(
-            user_id,
-            memory_data
-        )
-
-        print(
-            "NEW MENU SAVED AS CURRENT MENU"
-        )
-
-    # ========================================================
-    # Сбрасываем режим ввода после кнопок
-    # ========================================================
-
-    context.user_data.pop(
-        "awaiting_input",
-        None
-    )
-
-    # ========================================================
-    # Отправляем ответ
-    # ========================================================
+    context.user_data.pop("awaiting_input", None)
 
     try:
-
-        await send_long_message(
-            update.message,
-            answer,
-            reply_markup=main_keyboard()
-        )
-
-        print(
-            "TELEGRAM RESPONSE SENT"
-        )
-
+        await send_long_message(update.message, answer, reply_markup=main_keyboard())
+        print("TELEGRAM RESPONSE SENT")
     except Exception as e:
-
-        print(
-            "TELEGRAM ERROR:",
-            repr(e)
-        )
+        print("TELEGRAM ERROR:", repr(e))
 
 
 # ============================================================
@@ -3621,7 +2129,6 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-
     return "Menu bot is alive!"
 
 
@@ -3630,43 +2137,17 @@ def home():
 # ============================================================
 
 async def run_bot():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-    application = (
-        Application.builder()
-        .token(TELEGRAM_TOKEN)
-        .build()
-    )
-
-    application.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
-    )
-
-    application.add_handler(
-        CallbackQueryHandler(
-            button_handler
-        )
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            chat
-        )
-    )
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
 
     await application.initialize()
-
     await application.start()
-
     await application.updater.start_polling()
 
-    print(
-        "Telegram bot started!"
-    )
-
+    print("Telegram bot started!")
     await asyncio.Event().wait()
 
 
@@ -3675,24 +2156,15 @@ async def run_bot():
 # ============================================================
 
 async def main():
-
-    asyncio.create_task(
-        run_bot()
-    )
+    asyncio.create_task(run_bot())
 
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
 
     config = Config()
+    config.bind = [f"0.0.0.0:{os.environ.get('PORT', '10000')}"]
 
-    config.bind = [
-        f"0.0.0.0:{os.environ.get('PORT', '10000')}"
-    ]
-
-    await serve(
-        app,
-        config
-    )
+    await serve(app, config)
 
 
 # ============================================================
@@ -3700,7 +2172,4 @@ async def main():
 # ============================================================
 
 if __name__ == "__main__":
-
-    asyncio.run(
-        main()
-    )
+    asyncio.run(main())
