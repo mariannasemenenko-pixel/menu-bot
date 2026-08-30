@@ -2388,8 +2388,7 @@ async def run_bot():
     finally:
         log("Stopping Telegram bot...")
 
-        await application.bot.delete_webhook()
-
+       
         if application.running:
             await application.stop()
 
