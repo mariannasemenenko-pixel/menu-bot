@@ -2335,7 +2335,7 @@ async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def run_bot():
+async def setup_telegram():
     global telegram_application
 
     application = (
@@ -2345,54 +2345,30 @@ async def run_bot():
         .build()
     )
 
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(
-        CommandHandler("start", start)
+        MessageHandler(filters.TEXT & ~filters.COMMAND, chat)
     )
-
-    application.add_handler(
-        CallbackQueryHandler(button_handler)
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            chat
-        )
-    )
-
-    application.add_error_handler(
-        global_error_handler
-    )
+    application.add_error_handler(global_error_handler)
 
     telegram_application = application
 
     await application.initialize()
     await application.start()
 
-    webhook_url = (
-        os.environ.get("RENDER_EXTERNAL_URL")
-        + "/telegram"
-    )
+    webhook_url = os.environ.get("RENDER_EXTERNAL_URL") + "/telegram"
 
     await application.bot.set_webhook(
         url=webhook_url,
-        allowed_updates=Update.ALL_TYPES
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,  # очищаем старые апдейты после рестартов
     )
 
     log("Telegram bot started!")
     log("Telegram webhook:", webhook_url)
 
-    try:
-        await asyncio.Event().wait()
-
-    finally:
-        log("Stopping Telegram bot...")
-
-       
-        if application.running:
-            await application.stop()
-
-        await application.shutdown()
+    return application
 
 
 # ============================================================
@@ -2400,28 +2376,29 @@ async def run_bot():
 # ============================================================
 
 async def main():
-    telegram_task = asyncio.create_task(
-        run_bot()
-    )
+    application = await setup_telegram()
 
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
 
     config = Config()
-    config.bind = [
-        f"0.0.0.0:{os.environ.get('PORT', '10000')}"
-    ]
+    config.bind = [f"0.0.0.0:{os.environ.get('PORT', '10000')}"]
+    config.use_reloader = False
 
     try:
         await serve(app, config)
-
+    except Exception as e:
+        log("HYPERCORN ERROR:", repr(e))
+        log(traceback.format_exc())
+        raise
     finally:
-        telegram_task.cancel()
-
+        log("Stopping Telegram bot...")
         try:
-            await telegram_task
-        except asyncio.CancelledError:
-            pass
+            if application.running:
+                await application.stop()
+            await application.shutdown()
+        except Exception as e:
+            log("ERROR WHILE STOPPING TELEGRAM:", repr(e))
 
 
 # ============================================================
