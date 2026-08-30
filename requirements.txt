@@ -1,5 +1,6 @@
 python-telegram-bot==22.5
-Flask[async]
+flask[async]
+asgiref>=3.8
 hypercorn==0.17.3
 openai
 supabase
