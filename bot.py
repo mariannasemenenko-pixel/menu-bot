@@ -44,6 +44,25 @@ MEMORY_CHAR_LIMIT = 12000
 # Сколько последних меню храним в компактной истории (только названия блюд)
 MENU_HISTORY_LIMIT = 7
 
+# ============================================================
+# ДОСТУП И ОБЩАЯ ПАМЯТЬ ДРУЗЕЙ
+# ============================================================
+
+# Telegram ID людей, которым разрешено пользоваться ботом.
+# Узнать свой ID можно, написав боту @userinfobot.
+ALLOWED_USER_IDS = {"1221896532", "439046149"}
+
+# Оба человека из ALLOWED_USER_IDS работают с ОДНОЙ и той же записью
+# памяти в Supabase (общее меню, общие продукты дома, общие предпочтения,
+# общая история) — независимо от того, кто из них пишет боту.
+SHARED_MEMORY_KEY = "druzya"
+
+
+def is_allowed_user(update: Update) -> bool:
+    if not update.effective_user:
+        return False
+    return str(update.effective_user.id) in ALLOWED_USER_IDS
+
 
 def log(*args):
     """
@@ -1861,6 +1880,12 @@ def format_person_info(memory_data, person_key, person_label):
 # ============================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed_user(update):
+        await update.message.reply_text(
+            "Этот бот приватный и настроен только для конкретных людей 🙅"
+        )
+        return
+
     context.user_data.pop("replacement_type", None)
     context.user_data.pop("awaiting_input", None)
 
@@ -1894,7 +1919,9 @@ async def handle_button_press(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def _handle_button_press_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
     message = update.message
-    user_id = str(update.effective_user.id)
+    # Оба разрешённых человека работают с одной общей памятью —
+    # реальный Telegram ID для чтения/записи памяти не используется.
+    user_id = SHARED_MEMORY_KEY
 
     # ========================================================
     # ГЛАВНОЕ МЕНЮ
@@ -2219,7 +2246,15 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    user_id = str(update.effective_user.id)
+    if not is_allowed_user(update):
+        await update.message.reply_text(
+            "Этот бот приватный и настроен только для конкретных людей 🙅"
+        )
+        return
+
+    # Оба разрешённых человека работают с одной общей памятью —
+    # реальный Telegram ID для чтения/записи памяти не используется.
+    user_id = SHARED_MEMORY_KEY
     user_message = update.message.text.strip()
 
     log("MESSAGE:", user_message)
