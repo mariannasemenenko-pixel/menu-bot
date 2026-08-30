@@ -1459,7 +1459,7 @@ async def generate_new_menu(message, user_id, memory_data):
 Отвечай сразу готовым меню на русском языке.
 """
 
-    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="new_menu")
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=130, label="new_menu")
 
     if not answer:
         await message.reply_text(
@@ -1550,7 +1550,7 @@ async def replace_single_menu_item(current_menu, user_message, replacement_type,
 Отвечай на русском языке.
 """
 
-    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="replace_item")
+    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=110, label="replace_item")
 
 
 # ============================================================
@@ -2105,7 +2105,7 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         memory_task = asyncio.create_task(extract_memory_operations(user_message, memory_data))
         answer_task = asyncio.create_task(
-            ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="generic_parallel")
+            ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90, label="generic_parallel")
         )
 
         operations, answer = await asyncio.gather(memory_task, answer_task)
@@ -2241,7 +2241,7 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 задай только необходимый вопрос.
 """
 
-    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="generic_only")
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90, label="generic_only")
 
     if not answer:
         await update.message.reply_text(
