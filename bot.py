@@ -2297,7 +2297,19 @@ async def run_bot():
     await application.updater.start_polling()
 
     log("Telegram bot started!")
-    await asyncio.Event().wait()
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        log("Stopping Telegram bot...")
+
+        if application.updater.running:
+            await application.updater.stop()
+
+        if application.running:
+            await application.stop()
+
+        await application.shutdown()
 
 
 # ============================================================
