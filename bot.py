@@ -11,14 +11,13 @@ from supabase import create_client
 
 from telegram import (
     Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
 )
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
@@ -103,7 +102,9 @@ SYSTEM_PROMPT = """
 
 Не делай его питание экстремально калорийным или очень жирным.
 
-Завтрак Павла должен быть обычным, средним по размеру.
+Завтрак Павла должен быть маленьким и максимально простым в приготовлении:
+минимум ингредиентов, минимум шагов, буквально пара минут готовки.
+Не делай завтрак большим или сложным по составу.
 
 ============================================================
 МЕНЮ НА 3 ДНЯ
@@ -142,10 +143,20 @@ SYSTEM_PROMPT = """
 
 Для Марианны и Павла рассчитывай порции отдельно.
 
+ВАЖНО про основное блюдо и гарнир:
+Марианна и Павел едят основное блюдо и гарнир ДВАЖДЫ в день — на обед и на ужин.
+Это значит, что дневная порция основного блюда и гарнира = 2 порции (обед + ужин),
+а не одна. КБЖУ дневной порции основного и гарнира считай как сумму обеих порций.
+Количество ингредиентов и объём готового блюда на 3 дня рассчитывай исходя из
+6 порций на человека (2 порции × 3 дня), а не из 3.
+Завтрак Павла, овощи Павла и закуска Марианны остаются как раньше —
+по одной порции в день (готовятся/едятся один раз в день).
+
 Всегда указывай:
 - количество ингредиентов;
 - количество готового блюда;
-- размер дневной порции;
+- размер дневной порции (для основного и гарнира — с пометкой «обед» и «ужин»,
+  либо суммарно за день с явным указанием, что это 2 порции);
 - сколько приготовить всего на 3 дня.
 
 КБЖУ рассчитывай арифметически по фактическому количеству ингредиентов.
@@ -175,8 +186,13 @@ SYSTEM_PROMPT = """
 ОВОЩИ ПАВЛА
 ============================================================
 
-Павлу добавляй простое овощное дополнение,
-рассчитанное сразу на 3 дня.
+Павлу добавляй овощное дополнение, рассчитанное сразу на 3 дня.
+
+Оно НЕ должно быть максимально примитивным (не просто «нарезать сырые овощи»).
+Добавь чуть больше вкуса и разнообразия: лёгкая обжарка, запекание,
+заправка маслом/специями/лимоном/чесноком — но без сложной техники и
+многоэтапной готовки. Приготовление должно оставаться быстрым и лёгким,
+просто чуть интереснее, чем «нарезал и подал».
 
 ============================================================
 ХРАНЕНИЕ
@@ -268,7 +284,19 @@ SYSTEM_PROMPT = """
 
 Учитывай предыдущие меню и оценки.
 
-Не повторяй одно и то же основное блюдо слишком часто.
+Разнообразие обязательно по ВСЕМ пунктам меню, а не только по основному блюду:
+- завтрак Павла;
+- основное блюдо;
+- гарнир;
+- закуска Марианны;
+- овощи Павла.
+
+Перед созданием нового меню сверяйся с историей последних меню (она передаётся
+тебе в памяти) по каждому из этих пунктов отдельно и старайся не повторять
+одно и то же блюдо в каждой категории — предлагай разные варианты от раза
+к разу, насколько это позволяют ограничения и предпочтения. Не повторяй
+одно и то же блюдо (в любой категории) в двух последних меню подряд, если
+пользователь прямо не попросил именно его.
 
 Если блюдо отмечено как:
 «больше не готовить»
@@ -553,17 +581,31 @@ SYSTEM_PROMPT = """
 
 Для каждого человека указывай только те блюда, которые он действительно ест.
 
+Весь раздел ОБЯЗАТЕЛЬНО помещай внутрь разворачивающихся блоков —
+отдельный <blockquote expandable> для Марианны и отдельный для Павла.
+
+Основное и гарнир указывай раздельно на обед и на ужин (это две отдельные
+порции в течение дня), а не одной строкой.
+
 Используй формат:
 
 <b>⚖️ ПОРЦИИ И КБЖУ</b>
 
 🧑 <b>Марианна</b>
-
-🍗 <b>Основное</b>
+<blockquote expandable>
+🍗 <b>Основное (обед)</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🥔 <b>Гарнир</b>
+🍗 <b>Основное (ужин)</b>
+[размер порции] — [ккал]
+Б [г] / Ж [г] / У [г]
+
+🥔 <b>Гарнир (обед)</b>
+[размер порции] — [ккал]
+Б [г] / Ж [г] / У [г]
+
+🥔 <b>Гарнир (ужин)</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
@@ -574,19 +616,27 @@ SYSTEM_PROMPT = """
 🔥 <b>Итого за день</b>
 [ккал]
 Б [г] / Ж [г] / У [г]
-
+</blockquote>
 
 👨 <b>Павел</b>
-
+<blockquote expandable>
 🍳 <b>Завтрак</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🍗 <b>Основное</b>
+🍗 <b>Основное (обед)</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
-🥔 <b>Гарнир</b>
+🍗 <b>Основное (ужин)</b>
+[размер порции] — [ккал]
+Б [г] / Ж [г] / У [г]
+
+🥔 <b>Гарнир (обед)</b>
+[размер порции] — [ккал]
+Б [г] / Ж [г] / У [г]
+
+🥔 <b>Гарнир (ужин)</b>
 [размер порции] — [ккал]
 Б [г] / Ж [г] / У [г]
 
@@ -597,6 +647,10 @@ SYSTEM_PROMPT = """
 🔥 <b>Итого за день</b>
 [ккал]
 Б [г] / Ж [г] / У [г]
+</blockquote>
+
+«Итого за день» обязательно включает ОБЕ порции основного и ОБЕ порции
+гарнира (обед + ужин), а не одну.
 
 КБЖУ рассчитывай арифметически по фактическому количеству ингредиентов.
 
@@ -638,7 +692,8 @@ SYSTEM_PROMPT = """
 Каждый раздел должен быть компактным и легко читаемым в Telegram.
 
 Заголовки разделов и названия блюд/категорий — в <b>...</b>.
-Список покупок и детали каждого рецепта — в <blockquote expandable>...</blockquote>.
+Список покупок, детали каждого рецепта и раздел «Порции и КБЖУ»
+(отдельно для Марианны и отдельно для Павла) — в <blockquote expandable>...</blockquote>.
 
 Не используй Markdown-таблицы.
 
@@ -691,13 +746,13 @@ def empty_memory():
 # OPENAI — ОБЩАЯ ФУНКЦИЯ
 # ============================================================
 
-async def ask_openai(instructions, input_text, timeout=90, label="call"):
+async def ask_openai(instructions, input_text, timeout=180, label="call"):
     started = time.monotonic()
 
     try:
         response = await asyncio.wait_for(
             client.responses.create(
-                model="gpt-5-mini",
+                model="gpt-5.6-luna",
                 instructions=instructions,
                 input=input_text
             ),
@@ -727,52 +782,135 @@ async def ask_openai(instructions, input_text, timeout=90, label="call"):
 
 
 # ============================================================
-# КЛАВИАТУРЫ
+# КЛАВИАТУРЫ (постоянная клавиатура у поля ввода, не под сообщением)
 # ============================================================
 
+# --- Тексты кнопок (используются и в клавиатурах, и в роутинге) ---
+
+BTN_NEW_MENU = "🆕 Новое меню на 3 дня"
+BTN_REPLACE_MENU = "🔄 Заменить блюдо"
+BTN_PRODUCTS = "🛒 Продукты"
+BTN_COPY_SHOPPING_LIST = "📋 Скопировать список покупок"
+BTN_PREFERENCES = "❤️ Предпочтения"
+BTN_ABOUT = "ℹ️ О боте"
+
+BTN_REPLACE_BREAKFAST = "🍳 Завтрак"
+BTN_REPLACE_MAIN = "🍗 Основное"
+BTN_REPLACE_SNACK = "🥨 Закуска"
+BTN_REPLACE_VEGETABLES = "🥦 Овощи"
+
+BTN_FOOD_HOME = "🏠 Что есть дома"
+BTN_EDIT_FOOD = "✏️ Изменить продукты"
+BTN_CLEAR_FOOD_HOME = "🧹 Очистить продукты дома"
+
+BTN_PREF_MARIANNA = "🧑 Марианна: изменить"
+BTN_PREF_PAVEL = "👨 Павел: изменить"
+BTN_INFO_MARIANNA = "ℹ️ Информация о Марианне"
+BTN_INFO_PAVEL = "ℹ️ Информация о Павле"
+BTN_RATE_DISH = "⭐ Оценить блюдо"
+
+BTN_BACK = "↩️ Назад"
+
+
 def main_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🆕  Новое меню на 3 дня", callback_data="new_menu")],
-        [InlineKeyboardButton("🔄  Заменить блюдо", callback_data="replace_menu")],
-        [InlineKeyboardButton("🛒  Продукты", callback_data="products")],
-        [InlineKeyboardButton("❤️  Предпочтения", callback_data="preferences")],
-    ])
+    return ReplyKeyboardMarkup(
+        [
+            [BTN_NEW_MENU],
+            [BTN_REPLACE_MENU, BTN_PRODUCTS],
+            [BTN_COPY_SHOPPING_LIST],
+            [BTN_PREFERENCES, BTN_ABOUT],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def replace_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🍳  Завтрак", callback_data="replace_breakfast")],
-        [InlineKeyboardButton("🍗  Основное", callback_data="replace_main")],
-        [InlineKeyboardButton("🥨  Закуска", callback_data="replace_snack")],
-        [InlineKeyboardButton("🥦  Овощи", callback_data="replace_vegetables")],
-        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")],
-    ])
+    return ReplyKeyboardMarkup(
+        [
+            [BTN_REPLACE_BREAKFAST, BTN_REPLACE_MAIN],
+            [BTN_REPLACE_SNACK, BTN_REPLACE_VEGETABLES],
+            [BTN_BACK],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def products_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏠  Что есть дома", callback_data="food_home")],
-        [InlineKeyboardButton("✏️  Изменить продукты", callback_data="edit_food")],
-        [InlineKeyboardButton("🧹  Очистить продукты дома", callback_data="clear_food_home")],
-        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")],
-    ])
+    return ReplyKeyboardMarkup(
+        [
+            [BTN_FOOD_HOME],
+            [BTN_EDIT_FOOD],
+            [BTN_CLEAR_FOOD_HOME],
+            [BTN_BACK],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def preferences_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🧑  Марианна: изменить", callback_data="pref_marianna")],
-        [InlineKeyboardButton("👨  Павел: изменить", callback_data="pref_pavel")],
-        [InlineKeyboardButton("ℹ️  Информация о Марианне", callback_data="info_marianna")],
-        [InlineKeyboardButton("ℹ️  Информация о Павле", callback_data="info_pavel")],
-        [InlineKeyboardButton("⭐  Оценить блюдо", callback_data="rate_dish")],
-        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")],
-    ])
+    return ReplyKeyboardMarkup(
+        [
+            [BTN_PREF_MARIANNA, BTN_PREF_PAVEL],
+            [BTN_INFO_MARIANNA, BTN_INFO_PAVEL],
+            [BTN_RATE_DISH],
+            [BTN_BACK],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def back_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("↩️  Назад", callback_data="main_menu")]
-    ])
+    return ReplyKeyboardMarkup(
+        [[BTN_BACK]],
+        resize_keyboard=True,
+    )
+
+
+# Текст кнопки -> внутреннее действие (для роутинга обычных текстовых
+# сообщений, которые приходят при нажатии кнопок постоянной клавиатуры).
+BUTTON_TO_ACTION = {
+    BTN_NEW_MENU: "new_menu",
+    BTN_REPLACE_MENU: "replace_menu",
+    BTN_PRODUCTS: "products",
+    BTN_COPY_SHOPPING_LIST: "copy_shopping_list",
+    BTN_PREFERENCES: "preferences",
+    BTN_ABOUT: "about",
+    BTN_REPLACE_BREAKFAST: "replace_breakfast",
+    BTN_REPLACE_MAIN: "replace_main",
+    BTN_REPLACE_SNACK: "replace_snack",
+    BTN_REPLACE_VEGETABLES: "replace_vegetables",
+    BTN_FOOD_HOME: "food_home",
+    BTN_EDIT_FOOD: "edit_food",
+    BTN_CLEAR_FOOD_HOME: "clear_food_home",
+    BTN_PREF_MARIANNA: "pref_marianna",
+    BTN_PREF_PAVEL: "pref_pavel",
+    BTN_INFO_MARIANNA: "info_marianna",
+    BTN_INFO_PAVEL: "info_pavel",
+    BTN_RATE_DISH: "rate_dish",
+    BTN_BACK: "main_menu",
+}
+
+
+# ============================================================
+# ТЕКСТ КНОПКИ «О БОТЕ»
+# ============================================================
+
+ABOUT_TEXT = """Главное: из-за большого объема данных бот думает долго, минуты 3. Ниче с этим сделать смогла, сори.
+
+Короче, братан, гайд по кнопкам и возможностям:
+🆕 Новое меню на 3 дня — полное меню + покупки + приготовление + КБЖУ. Всё готовится один раз на три дня.
+🔄 Заменить блюдо — меняет только одно блюдо в текущем меню, остальное оставляет как есть. Можно выбрать, какое блюдо заменить и на что: на своё или попросить сгенерировать новое. Ну увидишь.
+🛒 Продукты — смотришь, что есть дома, добавляешь или убираешь. Это вообще не обязательно вести, но бот будет учитывать и использовать то, что есть дома.
+📋 Скопировать список покупок — выдаёт только список продуктов в удобном виде, чтобы можно было скопировать одним нажатием.
+❤️ Предпочтения — можно записать, что нам нравится/не нравится, оценить блюда, обновить вес (это влияет на генерацию порций) или другие данные.
+
+У бота нет чётких команд — пиши своими словами в любом разделе, он поймёт.
+Вообще можно просто писать текстом прямо в чат абсолютно любой вопрос по меню, готовке, списку покупок — бот в контексте и подскажет. Например:
+• «Сколько оливкового масла надо положить в салат?»
+• «Павел теперь весит 71 кг»
+• «Марианне понравилась запеканка»
+Бот понимает и запоминает.
+С тебя 3 тик тока за гайд."""
 
 
 # ============================================================
@@ -1299,7 +1437,7 @@ clear_food
 Не придумывай данные.
 """,
         input_text=prompt,
-        timeout=20,
+        timeout=40,
         label="memory_extract"
     )
 
@@ -1459,7 +1597,7 @@ async def generate_new_menu(message, user_id, memory_data):
 Отвечай сразу готовым меню на русском языке.
 """
 
-    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=130, label="new_menu")
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=240, label="new_menu")
 
     if not answer:
         await message.reply_text(
@@ -1550,7 +1688,7 @@ async def replace_single_menu_item(current_menu, user_message, replacement_type,
 Отвечай на русском языке.
 """
 
-    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=110, label="replace_item")
+    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=180, label="replace_item")
 
 
 # ============================================================
@@ -1583,6 +1721,56 @@ async def send_long_message(message, text, reply_markup=None):
 
     if text:
         await message.reply_text(text, parse_mode=parse_mode, reply_markup=reply_markup)
+
+
+# ============================================================
+# СПИСОК ПОКУПОК В ФОРМАТЕ ДЛЯ КОПИРОВАНИЯ
+# ============================================================
+
+def extract_shopping_list_plain(menu_html):
+    """
+    Достаёт содержимое раздела "🛒 ПОКУПКИ НА 3 ДНЯ" из уже сохранённого
+    HTML-меню и убирает лишнюю разметку (кроме переносов строк и буллетов),
+    чтобы список можно было положить в <pre> и скопировать одним нажатием.
+    """
+    if not menu_html:
+        return None
+
+    marker = "ПОКУПКИ НА 3 ДНЯ"
+    marker_idx = menu_html.find(marker)
+    if marker_idx == -1:
+        return None
+
+    bq_open_start = menu_html.find("<blockquote", marker_idx)
+    if bq_open_start == -1:
+        return None
+
+    bq_open_end = menu_html.find(">", bq_open_start)
+    if bq_open_end == -1:
+        return None
+    bq_open_end += 1
+
+    bq_close = menu_html.find("</blockquote>", bq_open_end)
+    if bq_close == -1:
+        return None
+
+    content = menu_html[bq_open_end:bq_close]
+
+    # Убираем теги форматирования, которые нельзя вкладывать внутрь <pre>.
+    content = re.sub(r"</?b>", "", content)
+    content = re.sub(r"</?i>", "", content)
+    content = content.strip("\n")
+
+    return content if content.strip() else None
+
+
+def format_shopping_list_for_copy(menu_html):
+    plain = extract_shopping_list_plain(menu_html)
+
+    if not plain:
+        return None
+
+    return "📋 <b>Список покупок</b> (нажми, чтобы скопировать):\n\n<pre>" + plain + "</pre>"
 
 
 # ============================================================
@@ -1680,41 +1868,37 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# CALLBACK — КНОПКИ
+# КНОПКИ ПОСТОЯННОЙ КЛАВИАТУРЫ
 # ============================================================
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_button_press(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
     try:
-        await _button_handler_impl(update, context)
+        await _handle_button_press_impl(update, context, action)
     except Exception as e:
         log("UNHANDLED BUTTON ERROR:", repr(e))
         log(traceback.format_exc())
 
         try:
-            if update.callback_query and update.callback_query.message:
-                await update.callback_query.message.reply_text(
-                    "Что-то пошло не так на моей стороне 😔\n\nПопробуй ещё раз.",
-                    reply_markup=main_keyboard()
-                )
+            await update.message.reply_text(
+                "Что-то пошло не так на моей стороне \U0001F614\n\n\u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u0435\u0449\u0451 \u0440\u0430\u0437.",
+                reply_markup=main_keyboard()
+            )
         except Exception as inner_e:
             log("FAILED TO SEND ERROR MESSAGE:", repr(inner_e))
 
 
-async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
+async def _handle_button_press_impl(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str):
+    message = update.message
     user_id = str(update.effective_user.id)
 
     # ========================================================
     # ГЛАВНОЕ МЕНЮ
     # ========================================================
-    if data == "main_menu":
+    if action == "main_menu":
         context.user_data.pop("replacement_type", None)
         context.user_data.pop("awaiting_input", None)
 
-        await query.edit_message_text(
+        await message.reply_text(
             "🍽️ <b>Главное меню</b>\n\nЧто будем делать?",
             parse_mode="HTML",
             reply_markup=main_keyboard()
@@ -1724,22 +1908,53 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
     # ========================================================
     # НОВОЕ МЕНЮ
     # ========================================================
-    if data == "new_menu":
+    if action == "new_menu":
         context.user_data.pop("replacement_type", None)
         context.user_data.pop("awaiting_input", None)
 
         memory_data = await load_user_memory(user_id, update.effective_user.first_name)
 
-        await query.edit_message_text("🆕 <b>Новое меню на 3 дня</b>\n\nСоставляю меню...", parse_mode="HTML")
+        await message.reply_text(
+            "🆕 <b>Новое меню на 3 дня</b>\n\nСоставляю меню...",
+            parse_mode="HTML",
+            reply_markup=main_keyboard()
+        )
 
-        await generate_new_menu(query.message, user_id, memory_data)
+        await generate_new_menu(message, user_id, memory_data)
+        return
+
+    # ========================================================
+    # СПИСОК ПОКУПОК ДЛЯ КОПИРОВАНИЯ
+    # ========================================================
+    if action == "copy_shopping_list":
+        memory_data = await load_user_memory(user_id, update.effective_user.first_name)
+        current_menu = memory_data["shared"].get("current_menu")
+
+        if not current_menu:
+            await message.reply_text(
+                "У нас сейчас нет сохранённого меню, поэтому и списка покупок пока нет \U0001F614\n\n"
+                "Нажми «🆕 Новое меню на 3 дня».",
+                reply_markup=main_keyboard()
+            )
+            return
+
+        copy_text = format_shopping_list_for_copy(current_menu)
+
+        if not copy_text:
+            await message.reply_text(
+                "Не получилось найти список покупок в текущем меню \U0001F614",
+                reply_markup=main_keyboard()
+            )
+            return
+
+        await send_long_message(message, copy_text, reply_markup=main_keyboard())
         return
 
     # ========================================================
     # ЗАМЕНА БЛЮДА — МЕНЮ ВЫБОРА
     # ========================================================
-    if data == "replace_menu":
-        await query.edit_message_text(
+    if action == "replace_menu":
+        await message.reply_text(
             "🔄 <b>Что заменить?</b>\n\nВыбери только один элемент текущего меню:",
             parse_mode="HTML",
             reply_markup=replace_keyboard()
@@ -1753,15 +1968,15 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
         "replace_vegetables": ("pavel_vegetables", "🥦 Овощи Павла")
     }
 
-    if data in replacement_map:
-        replacement_type, title = replacement_map[data]
+    if action in replacement_map:
+        replacement_type, title = replacement_map[action]
 
         memory_data = await load_user_memory(user_id, update.effective_user.first_name)
         current_menu = memory_data["shared"].get("current_menu")
 
         if not current_menu:
-            await query.edit_message_text(
-                "У нас сейчас нет сохранённого текущего меню 😔\n\nСначала создай новое меню.",
+            await message.reply_text(
+                "У нас сейчас нет сохранённого текущего меню \U0001F614\n\nСначала создай новое меню.",
                 reply_markup=main_keyboard()
             )
             return
@@ -1769,7 +1984,7 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["replacement_type"] = replacement_type
         context.user_data["awaiting_input"] = "replacement"
 
-        await query.edit_message_text(
+        await message.reply_text(
             f"{title}\n\n"
             "Напиши, на что заменить.\n\n"
             "Например:\n"
@@ -1784,29 +1999,29 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
     # ========================================================
     # ПРОДУКТЫ
     # ========================================================
-    if data == "products":
-        await query.edit_message_text(
+    if action == "products":
+        await message.reply_text(
             "🛒 <b>Продукты</b>\n\nЧто хочешь сделать?",
             parse_mode="HTML",
             reply_markup=products_keyboard()
         )
         return
 
-    if data == "food_home":
+    if action == "food_home":
         memory_data = await load_user_memory(user_id, update.effective_user.first_name)
         food = memory_data["shared"].get("food_at_home", {})
 
-        await query.edit_message_text(
+        await message.reply_text(
             format_food_at_home(food),
             parse_mode="HTML",
             reply_markup=products_keyboard()
         )
         return
 
-    if data == "edit_food":
+    if action == "edit_food":
         context.user_data["awaiting_input"] = "food"
 
-        await query.edit_message_text(
+        await message.reply_text(
             "✏️ <b>Изменить продукты</b>\n\n"
             "Просто напиши, что изменилось.\n\n"
             "Например:\n"
@@ -1820,12 +2035,12 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if data == "clear_food_home":
+    if action == "clear_food_home":
         memory_data = await load_user_memory(user_id, update.effective_user.first_name)
         memory_data["shared"]["food_at_home"] = {}
         await save_user_memory(user_id, memory_data)
 
-        await query.edit_message_text(
+        await message.reply_text(
             "🧹 Список продуктов дома очищен.",
             parse_mode="HTML",
             reply_markup=products_keyboard()
@@ -1835,18 +2050,18 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
     # ========================================================
     # ПРЕДПОЧТЕНИЯ
     # ========================================================
-    if data == "preferences":
-        await query.edit_message_text(
+    if action == "preferences":
+        await message.reply_text(
             "❤️ <b>Предпочтения</b>\n\nЧто хочешь сделать?",
             parse_mode="HTML",
             reply_markup=preferences_keyboard()
         )
         return
 
-    if data == "pref_marianna":
+    if action == "pref_marianna":
         context.user_data["awaiting_input"] = "marianna_preferences"
 
-        await query.edit_message_text(
+        await message.reply_text(
             "🧑 <b>Предпочтения Марианны</b>\n\n"
             "Напиши, что хочешь добавить, изменить или удалить.\n\n"
             "Например:\n"
@@ -1858,10 +2073,10 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if data == "pref_pavel":
+    if action == "pref_pavel":
         context.user_data["awaiting_input"] = "pavel_preferences"
 
-        await query.edit_message_text(
+        await message.reply_text(
             "👨 <b>Предпочтения Павла</b>\n\n"
             "Напиши, что хочешь добавить, изменить или удалить.\n\n"
             "Например:\n"
@@ -1873,30 +2088,30 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    if data == "info_marianna":
+    if action == "info_marianna":
         memory_data = await load_user_memory(user_id, update.effective_user.first_name)
 
-        await query.edit_message_text(
+        await message.reply_text(
             format_person_info(memory_data, "marianna", "Марианне"),
             parse_mode="HTML",
             reply_markup=preferences_keyboard()
         )
         return
 
-    if data == "info_pavel":
+    if action == "info_pavel":
         memory_data = await load_user_memory(user_id, update.effective_user.first_name)
 
-        await query.edit_message_text(
+        await message.reply_text(
             format_person_info(memory_data, "pavel", "Павле"),
             parse_mode="HTML",
             reply_markup=preferences_keyboard()
         )
         return
 
-    if data == "rate_dish":
+    if action == "rate_dish":
         context.user_data["awaiting_input"] = "rating"
 
-        await query.edit_message_text(
+        await message.reply_text(
             "⭐ <b>Оценить блюдо</b>\n\n"
             "Напиши, кто и как оценил блюдо.\n\n"
             "Например:\n"
@@ -1909,6 +2124,15 @@ async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
+    # ========================================================
+    # О БОТЕ
+    # ========================================================
+    if action == "about":
+        await message.reply_text(
+            ABOUT_TEXT,
+            reply_markup=main_keyboard()
+        )
+        return
 
 # ============================================================
 # ЛОКАЛЬНЫЕ ВЕТКИ БЕЗ ВТОРОГО ВЫЗОВА GPT
@@ -1993,6 +2217,15 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text.strip()
 
     log("MESSAGE:", user_message)
+
+    # ========================================================
+    # Нажатие кнопки постоянной клавиатуры (внизу у поля ввода).
+    # Проверяем раньше всего остального — например, «↩️ Назад» должно
+    # работать, даже если бот ждал ввода (продукты/предпочтения и т.д.).
+    # ========================================================
+    if user_message in BUTTON_TO_ACTION:
+        await handle_button_press(update, context, BUTTON_TO_ACTION[user_message])
+        return
 
     replacement_type_from_button = context.user_data.get("replacement_type")
     awaiting_input = context.user_data.get("awaiting_input")
@@ -2105,7 +2338,7 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         memory_task = asyncio.create_task(extract_memory_operations(user_message, memory_data))
         answer_task = asyncio.create_task(
-            ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90, label="generic_parallel")
+            ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=180, label="generic_parallel")
         )
 
         operations, answer = await asyncio.gather(memory_task, answer_task)
@@ -2241,7 +2474,7 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 задай только необходимый вопрос.
 """
 
-    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90, label="generic_only")
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=180, label="generic_only")
 
     if not answer:
         await update.message.reply_text(
@@ -2346,7 +2579,6 @@ async def setup_telegram():
     )
 
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, chat)
     )
