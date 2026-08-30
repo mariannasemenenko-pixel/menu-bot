@@ -5,7 +5,7 @@ import re
 import time
 import traceback
 
-from flask import Flask
+from flask import Flask, request
 from openai import AsyncOpenAI
 from supabase import create_client
 
@@ -2265,10 +2265,54 @@ async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = Flask(__name__)
 
+# Telegram Application будет создан один раз при запуске.
+telegram_application = None
+
 
 @app.route("/")
 def home():
     return "Menu bot is alive!"
+
+
+@app.route("/telegram", methods=["POST"])
+async def telegram_webhook():
+    """
+    Получает обновления от Telegram и передаёт их
+    в очередь python-telegram-bot.
+    """
+    global telegram_application
+
+    if telegram_application is None:
+        return "Bot is not ready", 503
+
+    try:
+        data = request.get_json(silent=True)
+
+        if not data:
+            return "Bad Request", 400
+
+        update = Update.de_json(
+            data=data,
+            bot=telegram_application.bot
+        )
+
+        await telegram_application.update_queue.put(update)
+
+        return "OK", 200
+
+    except Exception as e:
+        log("TELEGRAM WEBHOOK ERROR:", repr(e))
+        log(
+            "".join(
+                traceback.format_exception(
+                    type(e),
+                    e,
+                    e.__traceback__
+                )
+            )
+        )
+
+        return "Internal Server Error", 500
 
 
 # ============================================================
@@ -2277,34 +2321,74 @@ def home():
 
 async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Ловит любые исключения, не пойманные внутри обработчиков (включая
-    button_handler), чтобы они точно попадали в лог, а не терялись молча.
+    Ловит любые исключения, не пойманные внутри обработчиков.
     """
     log("GLOBAL TELEGRAM ERROR:", repr(context.error))
-    log("".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__)))
+    log(
+        "".join(
+            traceback.format_exception(
+                type(context.error),
+                context.error,
+                context.error.__traceback__
+            )
+        )
+    )
 
 
 async def run_bot():
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
+    global telegram_application
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
-    application.add_error_handler(global_error_handler)
+    application = (
+        Application.builder()
+        .token(TELEGRAM_TOKEN)
+        .updater(None)
+        .build()
+    )
+
+    application.add_handler(
+        CommandHandler("start", start)
+    )
+
+    application.add_handler(
+        CallbackQueryHandler(button_handler)
+    )
+
+    application.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            chat
+        )
+    )
+
+    application.add_error_handler(
+        global_error_handler
+    )
+
+    telegram_application = application
 
     await application.initialize()
     await application.start()
-    await application.updater.start_polling()
+
+    webhook_url = (
+        os.environ.get("RENDER_EXTERNAL_URL")
+        + "/telegram"
+    )
+
+    await application.bot.set_webhook(
+        url=webhook_url,
+        allowed_updates=Update.ALL_TYPES
+    )
 
     log("Telegram bot started!")
+    log("Telegram webhook:", webhook_url)
 
     try:
         await asyncio.Event().wait()
+
     finally:
         log("Stopping Telegram bot...")
 
-        if application.updater.running:
-            await application.updater.stop()
+        await application.bot.delete_webhook()
 
         if application.running:
             await application.stop()
@@ -2317,15 +2401,28 @@ async def run_bot():
 # ============================================================
 
 async def main():
-    asyncio.create_task(run_bot())
+    telegram_task = asyncio.create_task(
+        run_bot()
+    )
 
     from hypercorn.asyncio import serve
     from hypercorn.config import Config
 
     config = Config()
-    config.bind = [f"0.0.0.0:{os.environ.get('PORT', '10000')}"]
+    config.bind = [
+        f"0.0.0.0:{os.environ.get('PORT', '10000')}"
+    ]
 
-    await serve(app, config)
+    try:
+        await serve(app, config)
+
+    finally:
+        telegram_task.cancel()
+
+        try:
+            await telegram_task
+        except asyncio.CancelledError:
+            pass
 
 
 # ============================================================
