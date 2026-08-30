@@ -2,6 +2,8 @@ import os
 import asyncio
 import json
 import re
+import time
+import traceback
 
 from flask import Flask
 from openai import AsyncOpenAI
@@ -42,6 +44,15 @@ MEMORY_CHAR_LIMIT = 12000
 
 # Сколько последних меню храним в компактной истории (только названия блюд)
 MENU_HISTORY_LIMIT = 7
+
+
+def log(*args):
+    """
+    Обычный print() на Render может буферизоваться и не долетать до логов
+    вовремя (или теряться при рестарте контейнера). flush=True гарантирует,
+    что строка реально попадёт в лог сразу.
+    """
+    print(*args, flush=True)
 
 
 # ============================================================
@@ -680,7 +691,9 @@ def empty_memory():
 # OPENAI — ОБЩАЯ ФУНКЦИЯ
 # ============================================================
 
-async def ask_openai(instructions, input_text, timeout=90):
+async def ask_openai(instructions, input_text, timeout=90, label="call"):
+    started = time.monotonic()
+
     try:
         response = await asyncio.wait_for(
             client.responses.create(
@@ -691,20 +704,25 @@ async def ask_openai(instructions, input_text, timeout=90):
             timeout=timeout
         )
 
+        elapsed = time.monotonic() - started
+        log(f"OPENAI OK [{label}] in {elapsed:.1f}s")
+
         text = response.output_text.strip()
 
         if not text:
-            print("OPENAI EMPTY RESPONSE")
+            log(f"OPENAI EMPTY RESPONSE [{label}]")
             return None
 
         return text
 
     except asyncio.TimeoutError:
-        print(f"OPENAI TIMEOUT AFTER {timeout} SECONDS")
+        elapsed = time.monotonic() - started
+        log(f"OPENAI TIMEOUT [{label}] AFTER {elapsed:.1f}s (limit {timeout}s)")
         return None
 
     except Exception as e:
-        print("OPENAI ERROR:", repr(e))
+        elapsed = time.monotonic() - started
+        log(f"OPENAI ERROR [{label}] after {elapsed:.1f}s:", repr(e))
         return None
 
 
@@ -777,7 +795,7 @@ def load_user_memory_sync(user_id, first_name):
                 return migrate_memory(data)
 
     except Exception as e:
-        print("SUPABASE LOAD ERROR:", repr(e))
+        log("SUPABASE LOAD ERROR:", repr(e))
 
     data = empty_memory()
     data["marianna"]["other"]["user_name"] = first_name
@@ -807,10 +825,10 @@ def save_user_memory_sync(user_id, memory_data):
                 {"user_id": user_id, "memory": memory_data}
             ).execute()
 
-        print("MEMORY SAVED")
+        log("MEMORY SAVED")
 
     except Exception as e:
-        print("SUPABASE SAVE ERROR:", repr(e))
+        log("SUPABASE SAVE ERROR:", repr(e))
 
 
 async def save_user_memory(user_id, memory_data):
@@ -1164,7 +1182,7 @@ def apply_memory_updates(memory_data, operations):
 def serialize_memory(memory_data):
     text = json.dumps(memory_data, ensure_ascii=False, separators=(",", ":"))
     if len(text) > MEMORY_CHAR_LIMIT:
-        print("WARNING: MEMORY TOO LARGE:", len(text))
+        log("WARNING: MEMORY TOO LARGE:", len(text))
         text = text[:MEMORY_CHAR_LIMIT]
     return text
 
@@ -1281,7 +1299,8 @@ clear_food
 Не придумывай данные.
 """,
         input_text=prompt,
-        timeout=30
+        timeout=20,
+        label="memory_extract"
     )
 
     if not text:
@@ -1301,7 +1320,7 @@ clear_food
         return operations
 
     except Exception as e:
-        print("MEMORY JSON ERROR:", repr(e))
+        log("MEMORY JSON ERROR:", repr(e))
         return []
 
 
@@ -1440,7 +1459,7 @@ async def generate_new_menu(message, user_id, memory_data):
 Отвечай сразу готовым меню на русском языке.
 """
 
-    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90)
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="new_menu")
 
     if not answer:
         await message.reply_text(
@@ -1455,7 +1474,7 @@ async def generate_new_menu(message, user_id, memory_data):
     memory_data["shared"]["current_menu"] = answer
 
     await save_user_memory(user_id, memory_data)
-    print("NEW MENU SAVED AS CURRENT MENU")
+    log("NEW MENU SAVED AS CURRENT MENU")
 
     await send_long_message(message, answer, reply_markup=main_keyboard())
 
@@ -1531,7 +1550,7 @@ async def replace_single_menu_item(current_menu, user_message, replacement_type,
 Отвечай на русском языке.
 """
 
-    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90)
+    return await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="replace_item")
 
 
 # ============================================================
@@ -1665,6 +1684,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        await _button_handler_impl(update, context)
+    except Exception as e:
+        log("UNHANDLED BUTTON ERROR:", repr(e))
+        log(traceback.format_exc())
+
+        try:
+            if update.callback_query and update.callback_query.message:
+                await update.callback_query.message.reply_text(
+                    "Что-то пошло не так на моей стороне 😔\n\nПопробуй ещё раз.",
+                    reply_markup=main_keyboard()
+                )
+        except Exception as inner_e:
+            log("FAILED TO SEND ERROR MESSAGE:", repr(inner_e))
+
+
+async def _button_handler_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -1891,7 +1927,7 @@ async def handle_quick_memory_state(update, context, user_id, memory_data, state
     """
 
     operations = await extract_memory_operations(user_message, memory_data)
-    print("MEMORY OPERATIONS (quick):", operations)
+    log("MEMORY OPERATIONS (quick):", operations)
 
     if operations:
         memory_data = apply_memory_updates(memory_data, operations)
@@ -1928,13 +1964,35 @@ async def handle_quick_memory_state(update, context, user_id, memory_data, state
 # ============================================================
 
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Тонкая обёртка: гарантирует, что ЛЮБАЯ непойманная ошибка внутри
+    _chat_impl попадёт в лог (с трейсбеком) и пользователь получит
+    понятный ответ вместо бесконечного "висения" без единой строки в логах.
+    """
+    try:
+        await _chat_impl(update, context)
+    except Exception as e:
+        log("UNHANDLED CHAT ERROR:", repr(e))
+        log(traceback.format_exc())
+
+        try:
+            if update.message:
+                await update.message.reply_text(
+                    "Что-то пошло не так на моей стороне 😔\n\nПопробуй ещё раз.",
+                    reply_markup=main_keyboard()
+                )
+        except Exception as inner_e:
+            log("FAILED TO SEND ERROR MESSAGE:", repr(inner_e))
+
+
+async def _chat_impl(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
     user_id = str(update.effective_user.id)
     user_message = update.message.text.strip()
 
-    print("MESSAGE:", user_message)
+    log("MESSAGE:", user_message)
 
     replacement_type_from_button = context.user_data.get("replacement_type")
     awaiting_input = context.user_data.get("awaiting_input")
@@ -1979,7 +2037,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             memory_data["shared"]["current_menu"] = updated_menu
 
             await save_user_memory(user_id, memory_data)
-            print("CURRENT MENU UPDATED")
+            log("CURRENT MENU UPDATED")
 
             await send_long_message(update.message, updated_menu, reply_markup=main_keyboard())
         else:
@@ -1990,11 +2048,94 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ========================================================
-    # Память (общий чат, не спец-состояние)
+    # Заранее определяем, какая ветка сработает дальше.
+    # Это нужно, чтобы понять, можно ли безопасно распараллелить
+    # вызов "распознать изменение памяти" с основным вызовом,
+    # или лучше сделать их строго последовательно (когда branch
+    # сам делает отдельный, специализированный вызов к модели).
     # ========================================================
-    if should_check_memory(user_message):
+    wants_current_menu = is_current_menu_request(user_message)
+    wants_replacement = detect_replacement_request(user_message)
+    wants_new_menu = is_new_menu_request(user_message)
+
+    is_generic_branch = not (wants_current_menu or wants_replacement or wants_new_menu)
+    needs_memory_check = should_check_memory(user_message)
+
+    # ========================================================
+    # ОБЩАЯ ВЕТКА + нужна проверка памяти → распараллеливаем
+    # два вызова к модели вместо последовательного (30+90 → ~90 сек).
+    # ========================================================
+    if is_generic_branch and needs_memory_check:
+        memory_context = serialize_memory(memory_data)
+
+        prompt = f"""
+ПОСТОЯННАЯ ПАМЯТЬ ПОЛЬЗОВАТЕЛЯ:
+
+{memory_context}
+
+СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ:
+
+{user_message}
+
+============================================================
+
+Используй память как источник фактов.
+Учитывай также сам текст сообщения пользователя выше — если в нём
+есть новая информация (например, про продукты дома или предпочтения),
+она уже актуальна, даже если ещё не зафиксирована в блоке памяти.
+
+ВАЖНО:
+
+- не спрашивай повторно то, что уже известно;
+- данные Марианны и Павла не смешивай;
+- если пользователь спрашивает конкретное сохранённое значение, ответь непосредственно;
+- если пользователь просит новое меню — сразу составляй его;
+- учитывай продукты дома;
+- учитывай предпочтения;
+- учитывай оценки;
+- учитывай историю меню;
+- не придумывай отсутствующие данные.
+
+Если пользователь только что попросил удалить информацию,
+не утверждай, что она всё ещё существует в памяти.
+
+Если информации действительно не хватает для выполнения задачи,
+задай только необходимый вопрос.
+"""
+
+        memory_task = asyncio.create_task(extract_memory_operations(user_message, memory_data))
+        answer_task = asyncio.create_task(
+            ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="generic_parallel")
+        )
+
+        operations, answer = await asyncio.gather(memory_task, answer_task)
+
+        log("MEMORY OPERATIONS (parallel):", operations)
+
+        if operations:
+            memory_data = apply_memory_updates(memory_data, operations)
+            await save_user_memory(user_id, memory_data)
+
+        if not answer:
+            await update.message.reply_text(
+                "ИИ слишком долго отвечает 😔\n\nПопробуй ещё раз через несколько секунд.",
+                reply_markup=main_keyboard()
+            )
+            return
+
+        context.user_data.pop("awaiting_input", None)
+
+        await send_long_message(update.message, answer, reply_markup=main_keyboard())
+        log("TELEGRAM RESPONSE SENT")
+        return
+
+    # ========================================================
+    # Память (для веток замены/нового меню/текущего меню —
+    # применяем последовательно, до их собственного вызова к модели)
+    # ========================================================
+    if needs_memory_check:
         operations = await extract_memory_operations(user_message, memory_data)
-        print("MEMORY OPERATIONS:", operations)
+        log("MEMORY OPERATIONS:", operations)
 
         if operations:
             memory_data = apply_memory_updates(memory_data, operations)
@@ -2041,7 +2182,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             memory_data["shared"]["current_menu"] = updated_menu
 
             await save_user_memory(user_id, memory_data)
-            print("CURRENT MENU UPDATED")
+            log("CURRENT MENU UPDATED")
 
             await send_long_message(update.message, updated_menu, reply_markup=main_keyboard())
         else:
@@ -2100,7 +2241,7 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 задай только необходимый вопрос.
 """
 
-    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=90)
+    answer = await ask_openai(instructions=SYSTEM_PROMPT, input_text=prompt, timeout=75, label="generic_only")
 
     if not answer:
         await update.message.reply_text(
@@ -2109,15 +2250,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    print("OPENAI OK")
-
     context.user_data.pop("awaiting_input", None)
 
     try:
         await send_long_message(update.message, answer, reply_markup=main_keyboard())
-        print("TELEGRAM RESPONSE SENT")
+        log("TELEGRAM RESPONSE SENT")
     except Exception as e:
-        print("TELEGRAM ERROR:", repr(e))
+        log("TELEGRAM ERROR:", repr(e))
 
 
 # ============================================================
@@ -2136,18 +2275,28 @@ def home():
 # TELEGRAM
 # ============================================================
 
+async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Ловит любые исключения, не пойманные внутри обработчиков (включая
+    button_handler), чтобы они точно попадали в лог, а не терялись молча.
+    """
+    log("GLOBAL TELEGRAM ERROR:", repr(context.error))
+    log("".join(traceback.format_exception(type(context.error), context.error, context.error.__traceback__)))
+
+
 async def run_bot():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat))
+    application.add_error_handler(global_error_handler)
 
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
 
-    print("Telegram bot started!")
+    log("Telegram bot started!")
     await asyncio.Event().wait()
 
 
